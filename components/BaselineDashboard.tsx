@@ -81,7 +81,7 @@ const BaselineDashboard: React.FC = () => {
           getFocusAreaSelections(companyFilter),
           getBaselineCompetencyScores(companyFilter),
           getProgramConfig(companyFilter),
-          supabase.from('boon_benchmarks').select('*').eq('program_type', 'SCALE'),
+          supabase.from('boon_benchmarks').select('*').ilike('program_type', 'scale'),
           getPrograms(undefined, accName || company)
         ]);
 
