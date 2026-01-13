@@ -171,13 +171,14 @@ export const getSurveySubmissions = async (surveyType?: 'baseline' | 'end_of_pro
 
   let { data, error } = await query;
 
-  // Fallback: if company_id returned no results but we have accountName, try that instead
-  if (!error && (!data || data.length === 0) && filter?.companyId && filter?.accountName) {
+  // Fallback: if company_id returned no results, try accountName or companyName
+  const fallbackName = filter?.accountName || filter?.companyName;
+  if (!error && (!data || data.length === 0) && filter?.companyId && fallbackName) {
     let fallbackQuery = supabase.from('survey_submissions').select('*');
     if (surveyType) {
       fallbackQuery = fallbackQuery.eq('survey_type', surveyType);
     }
-    fallbackQuery = fallbackQuery.ilike('account_name', `%${filter.accountName}%`);
+    fallbackQuery = fallbackQuery.ilike('account_name', `%${fallbackName}%`);
 
     const fallbackResult = await fallbackQuery;
     data = fallbackResult.data;
@@ -211,12 +212,13 @@ export const getCompetencyPrePost = async (filter?: CompanyFilter): Promise<Comp
 
   let { data, error } = await query;
 
-  // Fallback: if company_id returned no results but we have accountName, try that instead
-  if (!error && (!data || data.length === 0) && filter?.companyId && filter?.accountName) {
+  // Fallback: if company_id returned no results, try accountName or companyName
+  const fallbackName = filter?.accountName || filter?.companyName;
+  if (!error && (!data || data.length === 0) && filter?.companyId && fallbackName) {
     const fallbackQuery = supabase
       .from('competency_pre_post')
       .select('*')
-      .ilike('account_name', `%${filter.accountName}%`);
+      .ilike('account_name', `%${fallbackName}%`);
 
     const fallbackResult = await fallbackQuery;
     data = fallbackResult.data;
@@ -250,13 +252,14 @@ export const getFocusAreaSelections = async (filter?: CompanyFilter): Promise<Fo
 
   let { data, error } = await query;
 
-  // Fallback: if company_id returned no results but we have accountName, try that instead
-  if (!error && (!data || data.length === 0) && filter?.companyId && filter?.accountName) {
+  // Fallback: if company_id returned no results, try accountName or companyName
+  const fallbackName = filter?.accountName || filter?.companyName;
+  if (!error && (!data || data.length === 0) && filter?.companyId && fallbackName) {
     const fallbackQuery = supabase
       .from('focus_area_selections')
       .select('*')
       .eq('selected', true)
-      .ilike('account_name', `%${filter.accountName}%`);
+      .ilike('account_name', `%${fallbackName}%`);
 
     const fallbackResult = await fallbackQuery;
     data = fallbackResult.data;
@@ -291,13 +294,14 @@ export const getBaselineCompetencyScores = async (filter?: CompanyFilter): Promi
 
   let { data, error } = await query;
 
-  // Fallback: if company_id returned no results but we have accountName, try that instead
-  if (!error && (!data || data.length === 0) && filter?.companyId && filter?.accountName) {
+  // Fallback: if company_id returned no results, try accountName or companyName
+  const fallbackName = filter?.accountName || filter?.companyName;
+  if (!error && (!data || data.length === 0) && filter?.companyId && fallbackName) {
     const fallbackQuery = supabase
       .from('competency_scores')
       .select('*')
       .eq('score_type', 'baseline')
-      .ilike('account_name', `%${filter.accountName}%`);
+      .ilike('account_name', `%${fallbackName}%`);
 
     const fallbackResult = await fallbackQuery;
     data = fallbackResult.data;
@@ -336,12 +340,13 @@ export const getCompetencyScores = async (filter?: CompanyFilter): Promise<Compe
 
   let { data, error } = await query;
 
-  // Fallback: if company_id returned no results but we have accountName, try that instead
-  if (!error && (!data || data.length === 0) && filter?.companyId && filter?.accountName) {
+  // Fallback: if company_id returned no results, try accountName or companyName
+  const fallbackName = filter?.accountName || filter?.companyName;
+  if (!error && (!data || data.length === 0) && filter?.companyId && fallbackName) {
     const fallbackQuery = supabase
       .from('competency_pre_post')
       .select('*')
-      .ilike('account_name', `%${filter.accountName}%`);
+      .ilike('account_name', `%${fallbackName}%`);
 
     const fallbackResult = await fallbackQuery;
     data = fallbackResult.data;
@@ -386,10 +391,11 @@ export const getSurveyResponses = async (filter?: CompanyFilter): Promise<Survey
         .in('survey_type', ['end_of_program', 'feedback', 'first_session', 'touchpoint']);
 
       // Apply company filter based on method
+      const fallbackName = filter?.accountName || filter?.companyName;
       if (useCompanyId && filter?.companyId) {
         query = query.eq('company_id', filter.companyId);
-      } else if (filter?.accountName) {
-        query = query.ilike('account_name', `%${filter.accountName}%`);
+      } else if (fallbackName) {
+        query = query.ilike('account_name', `%${fallbackName}%`);
       }
 
       const { data, error } = await query.range(from, from + pageSize - 1);
@@ -414,8 +420,8 @@ export const getSurveyResponses = async (filter?: CompanyFilter): Promise<Survey
   // Try with company_id first
   let allData = filter?.companyId ? await fetchAllPages(true) : await fetchAllPages(false);
 
-  // Fallback: if company_id returned no results but we have accountName, try that instead
-  if (allData.length === 0 && filter?.companyId && filter?.accountName) {
+  // Fallback: if company_id returned no results, try accountName or companyName
+  if (allData.length === 0 && filter?.companyId && (filter?.accountName || filter?.companyName)) {
     allData = await fetchAllPages(false);
   }
 
@@ -475,12 +481,13 @@ export const getWelcomeSurveyData = async (filter?: CompanyFilter): Promise<Welc
 
   let { data, error } = await query;
 
-  // Fallback: if company_id returned no results but we have accountName, try that instead
-  if (!error && (!data || data.length === 0) && filter?.companyId && filter?.accountName) {
+  // Fallback: if company_id returned no results, try accountName or companyName
+  const fallbackName = filter?.accountName || filter?.companyName;
+  if (!error && (!data || data.length === 0) && filter?.companyId && fallbackName) {
     const fallbackQuery = supabase
       .from('welcome_survey_baseline')
       .select('*')
-      .ilike('account', `%${filter.accountName}%`);
+      .ilike('account', `%${fallbackName}%`);
 
     const fallbackResult = await fallbackQuery;
     data = fallbackResult.data;
@@ -545,13 +552,14 @@ export const getWelcomeSurveyScaleData = async (filter?: CompanyFilter): Promise
 
   let { data, error } = await query;
 
-  // Fallback: if company_id returned no results but we have accountName, try that instead
+  // Fallback: if company_id returned no results, try accountName or companyName
   // This handles cases where older data doesn't have company_id populated
-  if (!error && (!data || data.length === 0) && filter?.companyId && filter?.accountName) {
+  const fallbackName = filter?.accountName || filter?.companyName;
+  if (!error && (!data || data.length === 0) && filter?.companyId && fallbackName) {
     const fallbackQuery = supabase
       .from('welcome_survey_scale')
       .select('*')
-      .ilike('account', `%${filter.accountName}%`);
+      .ilike('account', `%${fallbackName}%`);
 
     const fallbackResult = await fallbackQuery;
     data = fallbackResult.data;
