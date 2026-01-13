@@ -450,19 +450,13 @@ export const getWelcomeSurveyScaleData = async (filter?: CompanyFilter): Promise
   // Note: welcome_survey_scale uses 'account' column for filtering
   // IMPORTANT: company_id is unreliable in this table (multiple companies share same ID)
   // So we prefer filtering by account name when available
-  console.log('DEBUG getWelcomeSurveyScaleData filter:', filter);
   if (filter?.accountName) {
-    console.log('DEBUG filtering by account ilike:', `%${filter.accountName}%`);
     query = query.ilike('account', `%${filter.accountName}%`);
   } else if (filter?.companyName) {
-    console.log('DEBUG filtering by account (companyName) ilike:', `%${filter.companyName}%`);
     query = query.ilike('account', `%${filter.companyName}%`);
   } else if (filter?.companyId) {
     // Fallback to company_id only if no name available (less reliable)
-    console.log('DEBUG filtering by company_id (fallback):', filter.companyId);
     query = query.eq('company_id', filter.companyId);
-  } else {
-    console.log('DEBUG WARNING: No filter applied - returning ALL records');
   }
 
   const { data, error } = await query;
@@ -472,17 +466,6 @@ export const getWelcomeSurveyScaleData = async (filter?: CompanyFilter): Promise
     Sentry.captureException(error, { tags: { query: 'getWelcomeSurveyScaleData' } });
     return [];
   }
-
-  // DEBUG: Check what accounts were returned
-  const uniqueAccounts = [...new Set(data.map((d: any) => d.account))];
-  console.log('DEBUG unique accounts returned:', uniqueAccounts);
-  console.log('DEBUG total records returned:', data.length);
-
-  // DEBUG: Check raw previous_coaching values before normalization
-  const rawPcValues = data.map((d: any) => d.previous_coaching);
-  const uniqueRaw = [...new Set(rawPcValues.map((v: any) => `${v} (type: ${typeof v})`))];
-  console.log('DEBUG RAW previous_coaching values from DB:', uniqueRaw);
-  console.log('DEBUG RAW previous_coaching sample:', rawPcValues.slice(0, 5));
 
   // Normalize data to match WelcomeSurveyEntry format (same as GROW data)
   return data.map((d: any) => ({

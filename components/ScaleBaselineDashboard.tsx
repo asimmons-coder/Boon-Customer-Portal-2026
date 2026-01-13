@@ -96,10 +96,8 @@ const ScaleBaselineDashboard: React.FC = () => {
         if (isAdmin) {
           try {
             const stored = localStorage.getItem('boon_admin_company_override');
-            console.log('DEBUG admin override raw:', stored);
             if (stored) {
               const override = JSON.parse(stored);
-              console.log('DEBUG admin override parsed:', override);
               company = override.account_name;
               companyId = override.id || companyId;
               accName = override.account_name || accName;
@@ -107,31 +105,14 @@ const ScaleBaselineDashboard: React.FC = () => {
           } catch {}
         }
 
-        console.log('DEBUG filter inputs:', { companyId, accName, company });
         setCompanyName(accName || company);
 
         // Build company filter using helper
         const companyFilter = buildCompanyFilter(companyId, accName, company);
 
-        console.log('ScaleBaselineDashboard using company filter:', companyFilter);
-
         // Fetch survey data - already filtered by company at query level
         const data = await getWelcomeSurveyScaleData(companyFilter);
         setSurveyData(data as unknown as ScaleWelcomeSurvey[]);
-
-        // DEBUG: Check previous_coaching values
-        const pcValues = data.map((d: any) => d.previous_coaching);
-        const uniquePcValues = [...new Set(pcValues)];
-        console.log('DEBUG previous_coaching unique values:', uniquePcValues);
-        console.log('DEBUG previous_coaching sample (first 10):', pcValues.slice(0, 10));
-        console.log('DEBUG previous_coaching counts:', {
-          total: pcValues.length,
-          null: pcValues.filter(v => v === null).length,
-          undefined: pcValues.filter(v => v === undefined).length,
-          one: pcValues.filter(v => v === '1' || v === 1).length,
-          zero: pcValues.filter(v => v === '0' || v === 0).length,
-          other: pcValues.filter(v => v !== null && v !== undefined && v !== '1' && v !== 1 && v !== '0' && v !== 0).length
-        });
 
         // Extract unique programs from survey data
         const uniquePrograms = new Set<string>();
@@ -142,11 +123,6 @@ const ScaleBaselineDashboard: React.FC = () => {
           }
         });
         setPrograms(['All Programs', ...Array.from(uniquePrograms).sort()]);
-
-        // DEBUG: Show account + program_title pairs to identify data issues
-        const accountProgramPairs = [...new Set(data.map((d: any) => `${d.account} → ${d.program_title}`))];
-        console.log('DEBUG account → program_title pairs:', accountProgramPairs);
-        console.log('ScaleBaselineDashboard programs found:', Array.from(uniquePrograms));
 
         // Fetch benchmarks
         const { data: benchmarkData, error: benchmarkError } = await supabase
