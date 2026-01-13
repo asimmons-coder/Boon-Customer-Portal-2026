@@ -178,11 +178,12 @@ const ScaleDashboard: React.FC = () => {
   const metrics = useMemo(() => {
     if (loading) return null;
 
-    const normalize = (s: string) => s?.toLowerCase().trim() || '';
+    // Normalize strings for comparison: lowercase, convert hyphens to spaces, collapse whitespace
+    const normalize = (s: string) => s?.toLowerCase().replace(/-/g, ' ').replace(/\s+/g, ' ').trim() || '';
     // Use accountName if set (for multi-company accounts like Media Arts Lab)
     // Otherwise fall back to company name
     const currentAccount = normalize(
-      accountName || 
+      accountName ||
       companyName
         .split(' - ')[0]
         .replace(/\s+(SCALE|GROW|EXEC)$/i, '')
@@ -356,26 +357,19 @@ const ScaleDashboard: React.FC = () => {
       });
     });
 
-    // Filter surveys by account - extract first word for matching since accounts may differ
-    // e.g., user company "Seubert & Associates" should match survey account "Seubert"
+    // Filter surveys by account - use flexible matching to handle name variations
+    // e.g., "MacKenzie-Childs" should match "Mackenzie Childs", "Seubert & Associates" should match "Seubert"
     const accountFirstWord = currentAccount.split(/[\s&]/)[0]; // Get first word before space or &
-    
-    // Debug logging
-    console.log('Survey Debug:', {
-      companyName,
-      currentAccount,
-      accountFirstWord,
-      totalSurveys: surveys.length,
-      sampleSurveyAccounts: surveys.slice(0, 5).map(s => (s as any).account_name)
-    });
-    
+
     const cohortSurveys = surveys.filter(s => {
       const surveyAccount = normalize((s as any).account_name || '');
-      const match = surveyAccount.includes(accountFirstWord) || accountFirstWord.includes(surveyAccount);
-      return match;
+      const surveyFirstWord = surveyAccount.split(/[\s&]/)[0];
+      // Check multiple matching strategies for flexibility
+      return surveyAccount.includes(accountFirstWord) ||
+             accountFirstWord.includes(surveyFirstWord) ||
+             currentAccount.includes(surveyAccount) ||
+             surveyAccount.includes(currentAccount);
     });
-    
-    console.log('Matched surveys:', cohortSurveys.length);
     
     const npsScores = cohortSurveys.map(s => s.nps).filter((s): s is number => s !== null && s !== undefined);
     const promoters = npsScores.filter(s => s >= 9).length;
@@ -959,14 +953,20 @@ const ScaleTestimonialsSection: React.FC<{
     }
   ];
   
-  const normalize = (str: string) => (str || '').toLowerCase().trim();
+  // Normalize: lowercase, convert hyphens to spaces, collapse whitespace
+  const normalize = (str: string) => (str || '').toLowerCase().replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
   const currentAccount = normalize(companyName.split(' - ')[0]);
   const accountFirstWord = currentAccount.split(/[\s&]/)[0];
-  
-  // Filter surveys by company
+
+  // Filter surveys by company - compare normalized versions for flexible matching
   const cohortSurveys = surveys.filter(s => {
     const surveyAccount = normalize((s as any).account_name || '');
-    return surveyAccount.includes(accountFirstWord) || accountFirstWord.includes(surveyAccount);
+    // Check if either contains the other, or if first words match
+    const surveyFirstWord = surveyAccount.split(/[\s&]/)[0];
+    return surveyAccount.includes(accountFirstWord) ||
+           accountFirstWord.includes(surveyFirstWord) ||
+           currentAccount.includes(surveyAccount) ||
+           surveyAccount.includes(currentAccount);
   });
   
   // Get all feedback text from touchpoint and feedback surveys
