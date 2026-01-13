@@ -12,6 +12,7 @@ interface AIInsightsProps {
   companyId: string;
   programType: 'SCALE' | 'GROW';
   timeWindowDays: number; // 30, 90, 180, or 365
+  selectedProgram?: string; // 'All Programs' or specific program name
   // Session data
   totalSessions: number;
   uniqueParticipants: number;
@@ -41,6 +42,7 @@ const AIInsights: React.FC<AIInsightsProps> = ({
   companyId,
   programType,
   timeWindowDays,
+  selectedProgram = 'All Programs',
   totalSessions,
   uniqueParticipants,
   adoptionRate,
@@ -63,22 +65,33 @@ const AIInsights: React.FC<AIInsightsProps> = ({
     const topLeadershipThemes = themes.leadership.slice(0, 5).map(t => `${t.theme} (${t.count} sessions)`).join(', ');
     const topWellbeingThemes = themes.wellbeing.slice(0, 5).map(t => `${t.theme} (${t.count} sessions)`).join(', ');
     const topCommunicationThemes = themes.communication.slice(0, 5).map(t => `${t.theme} (${t.count} sessions)`).join(', ');
-    
+
     // Calculate date range for context
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - timeWindowDays);
-    
+
     const formatDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    const timeWindowLabel = timeWindowDays === 30 ? 'Last 30 Days' 
+    const timeWindowLabel = timeWindowDays === 30 ? 'Last 30 Days'
       : timeWindowDays === 90 ? 'Last 90 Days (Quarter)'
       : timeWindowDays === 180 ? 'Last 6 Months'
       : 'Last 12 Months';
-    
+
     const dateRangeStr = `${formatDate(startDate)} - ${formatDate(endDate)}`;
-    
+
+    const isAllPrograms = selectedProgram === 'All Programs';
+    const programScope = isAllPrograms
+      ? `ALL programs/regions combined (cross-program view)`
+      : `Specific program: ${selectedProgram}`;
+
     let summary = `
 ## Boon Coaching Program Data for ${companyName}
+
+IMPORTANT TONE GUIDANCE: Write in a warm, conversational tone - like a knowledgeable colleague sharing insights over coffee. Avoid stiff corporate language. Be direct and helpful without being overly formal.
+
+### Scope
+- Viewing: ${programScope}
+${isAllPrograms ? '- NOTE: When analyzing all programs, highlight cross-regional patterns, compare performance across programs, and identify company-wide trends.' : ''}
 
 ### Time Period: ${timeWindowLabel}
 Date Range: ${dateRangeStr}
