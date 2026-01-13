@@ -144,8 +144,8 @@ const ScaleDashboard: React.FC = () => {
     setProgramDropdownOpen(false);
   };
 
-  // Get unique programs from sessions AND employees (to include programs without sessions yet)
-  // Filter to only include programs for the current company
+  // Get unique programs from employee_manager ONLY (the authoritative source)
+  // This ensures the dropdown matches what's shown in the employee manager view
   const availablePrograms = useMemo(() => {
     const programs = new Set<string>();
     const normalize = (s: string) => s?.toLowerCase().trim() || '';
@@ -162,26 +162,15 @@ const ScaleDashboard: React.FC = () => {
       return normalized.includes(currentAccount) || currentAccount.includes(normalized.split(' ')[0]);
     };
 
-    // Add programs from session_tracking (filtered by company)
-    sessions.forEach(s => {
-      const pt = (s as any).program_title;
-      const acct = (s as any).account_name;
-      if (pt && matchesCompany(acct)) programs.add(pt);
-    });
-    // Also add programs from employee_manager (filtered by company)
+    // Get programs ONLY from employee_manager (authoritative source)
     employees.forEach(e => {
       const pt = (e as any).program_title || (e as any).coaching_program;
       const acct = (e as any).account_name || e.company_name || e.company;
       if (pt && matchesCompany(acct)) programs.add(pt);
     });
-    // Also add programs from welcome_survey_scale (filtered by company)
-    welcomeSurveys.forEach(w => {
-      const pt = w.program_title;
-      const acct = w.account_name;
-      if (pt && matchesCompany(acct)) programs.add(pt);
-    });
+
     return ['All Programs', ...Array.from(programs).sort()];
-  }, [sessions, employees, welcomeSurveys, accountName, companyName]);
+  }, [employees, accountName, companyName]);
 
   const metrics = useMemo(() => {
     if (loading) return null;
