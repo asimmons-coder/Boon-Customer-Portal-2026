@@ -330,6 +330,16 @@ const HomeDashboard: React.FC = () => {
         return pTitle === selNorm || pName === selNorm || cName === selNorm || pCode === selNorm;
     });
 
+    // DEBUG - session filtering
+    console.log('DEBUG SESSION FILTERING:', {
+      selectedCohort,
+      selNorm,
+      totalSessionsInState: sessions.length,
+      cohortSessionsCount: cohortSessions.length,
+      uniqueProgramTitles: [...new Set(sessions.map((s: any) => s.program_title))],
+      sampleSession: sessions[0]
+    });
+
     // 2. Get total employees from roster (not just those with sessions)
     const enrolledEmployees = employees.filter(e => {
         if (isAll) return true;
