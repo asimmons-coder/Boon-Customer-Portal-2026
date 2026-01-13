@@ -66,6 +66,7 @@ interface CompanyOverride {
   account_name: string;
   programType: 'GROW' | 'Scale';
   employeeCount?: number;
+  company_id?: string;
 }
 
 const AdminCompanySwitcher: React.FC<{
@@ -89,7 +90,7 @@ const AdminCompanySwitcher: React.FC<{
       while (true) {
         const { data, error } = await supabase
           .from('session_tracking')
-          .select('account_name, program_title')
+          .select('account_name, program_title, company_id')
           .order('account_name')
           .range(from, from + pageSize - 1);
 
@@ -112,17 +113,21 @@ const AdminCompanySwitcher: React.FC<{
       console.log(`AdminSwitcher: Total rows fetched: ${allData.length}`);
 
       if (allData.length > 0) {
-        // Get unique account_names with their program type and employee count
-        const uniqueMap = new Map<string, { programType: 'GROW' | 'Scale', count: number }>();
+        // Get unique account_names with their program type, employee count, and company_id
+        const uniqueMap = new Map<string, { programType: 'GROW' | 'Scale', count: number, company_id?: string }>();
         allData.forEach(row => {
           if (row.account_name) {
             const existing = uniqueMap.get(row.account_name);
             if (existing) {
               existing.count++;
+              // Keep the company_id if we found one
+              if (row.company_id && !existing.company_id) {
+                existing.company_id = row.company_id;
+              }
             } else {
               const isScale = row.program_title?.toUpperCase().includes('SCALE') ||
                              row.account_name?.toUpperCase().includes('SCALE');
-              uniqueMap.set(row.account_name, { programType: isScale ? 'Scale' : 'GROW', count: 1 });
+              uniqueMap.set(row.account_name, { programType: isScale ? 'Scale' : 'GROW', count: 1, company_id: row.company_id });
             }
           }
         });
@@ -130,7 +135,8 @@ const AdminCompanySwitcher: React.FC<{
         const companyList = Array.from(uniqueMap.entries()).map(([account_name, data]) => ({
           account_name,
           programType: data.programType,
-          employeeCount: data.count
+          employeeCount: data.count,
+          company_id: data.company_id
         }));
         // Sort by employee count (most to least)
         setCompanies(companyList.sort((a, b) => b.employeeCount - a.employeeCount));
@@ -326,9 +332,9 @@ const MainPortalLayout: React.FC = () => {
           try {
             const stored = localStorage.getItem(ADMIN_COMPANY_KEY);
             if (stored) {
-              const override = JSON.parse(stored);
-              if (override.id) {
-                companyId = override.id;
+              const override = JSON.parse(stored) as CompanyOverride;
+              if (override.company_id) {
+                companyId = override.company_id;
               }
             }
           } catch {}

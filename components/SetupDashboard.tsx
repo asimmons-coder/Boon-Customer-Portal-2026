@@ -192,7 +192,7 @@ const SetupDashboard: React.FC = () => {
             if (stored) {
               const override = JSON.parse(stored);
               company = override.account_name;
-              compId = override.id || compId;
+              compId = override.company_id || compId;
             }
           } catch {}
         }

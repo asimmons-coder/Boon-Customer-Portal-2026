@@ -60,7 +60,7 @@ const BaselineDashboard: React.FC = () => {
             if (stored) {
               const override = JSON.parse(stored);
               company = override.account_name;
-              companyId = override.id || companyId;
+              companyId = override.company_id || companyId;
               accName = override.account_name || accName;
             }
           } catch {}
