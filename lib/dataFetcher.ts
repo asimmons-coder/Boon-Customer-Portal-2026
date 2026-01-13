@@ -36,6 +36,7 @@ export interface CompanyFilter {
   companyId?: string;      // UUID - exact company match, gets ALL locations for that company
   accountName?: string;    // Display name - partial match with ilike for specific location
   programTitle?: string;   // Optional: filter to specific program within the company
+  companyName?: string;    // Fallback company name for tables with unreliable company_id
 }
 
 // ============================================
@@ -446,14 +447,20 @@ export const getWelcomeSurveyScaleData = async (filter?: CompanyFilter): Promise
     .select('*');
 
   // Apply company filter
-  // Note: welcome_survey_scale uses 'account' column, not 'account_name'
+  // Note: welcome_survey_scale uses 'account' column for filtering
+  // IMPORTANT: company_id is unreliable in this table (multiple companies share same ID)
+  // So we prefer filtering by account name when available
   console.log('DEBUG getWelcomeSurveyScaleData filter:', filter);
-  if (filter?.companyId) {
-    console.log('DEBUG filtering by company_id:', filter.companyId);
-    query = query.eq('company_id', filter.companyId);
-  } else if (filter?.accountName) {
+  if (filter?.accountName) {
     console.log('DEBUG filtering by account ilike:', `%${filter.accountName}%`);
     query = query.ilike('account', `%${filter.accountName}%`);
+  } else if (filter?.companyName) {
+    console.log('DEBUG filtering by account (companyName) ilike:', `%${filter.companyName}%`);
+    query = query.ilike('account', `%${filter.companyName}%`);
+  } else if (filter?.companyId) {
+    // Fallback to company_id only if no name available (less reliable)
+    console.log('DEBUG filtering by company_id (fallback):', filter.companyId);
+    query = query.eq('company_id', filter.companyId);
   } else {
     console.log('DEBUG WARNING: No filter applied - returning ALL records');
   }
@@ -624,23 +631,25 @@ export const buildCompanyFilter = (
   accountName?: string,
   companyName?: string
 ): CompanyFilter => {
+  // Clean company name for fallback use
+  const cleanedCompanyName = companyName
+    ? companyName.split(' - ')[0].replace(/\s+(SCALE|GROW|EXEC)$/i, '').trim()
+    : undefined;
+
   // Multi-location account: user has specific account_name
   if (accountName) {
-    return { accountName };
+    return { accountName, companyName: cleanedCompanyName };
   }
-  
+
   // Single company account: use company_id
+  // Also include companyName as fallback for tables with unreliable company_id
   if (companyId) {
-    return { companyId };
+    return { companyId, companyName: cleanedCompanyName };
   }
-  
-  // Fallback: use company name with cleaning
-  if (companyName) {
-    const cleanName = companyName
-      .split(' - ')[0]
-      .replace(/\s+(SCALE|GROW|EXEC)$/i, '')
-      .trim();
-    return { accountName: cleanName };
+
+  // Fallback: use company name with partial matching
+  if (cleanedCompanyName) {
+    return { accountName: cleanedCompanyName, companyName: cleanedCompanyName };
   }
   
   // No filter - will return all data (should not happen in practice)
