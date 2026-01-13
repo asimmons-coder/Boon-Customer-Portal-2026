@@ -36,6 +36,7 @@ export interface CompanyFilter {
   companyId?: string;      // UUID - exact company match, gets ALL locations for that company
   accountName?: string;    // Display name - partial match with ilike for specific location
   programTitle?: string;   // Optional: filter to specific program within the company
+  companyName?: string;    // Fallback company name for tables with unreliable company_id
 }
 
 // ============================================
@@ -54,8 +55,9 @@ export const getEmployeeRoster = async (filter?: CompanyFilter): Promise<Employe
 
   // Apply company filter at query level
   // For multi-location: accountName takes precedence if set
+  // Note: employee_manager uses 'company_name' not 'account_name'
   if (filter?.accountName) {
-    query = query.ilike('account_name', `%${filter.accountName}%`);
+    query = query.ilike('company_name', `%${filter.accountName}%`);
   } else if (filter?.companyId) {
     query = query.eq('company_id', filter.companyId);
   }
@@ -342,14 +344,21 @@ export const getSurveyResponses = async (filter?: CompanyFilter): Promise<Survey
     from += pageSize;
   }
 
-  // Filter to records that have NPS OR feedback OR wellbeing data
-  const filteredData = allData.filter(d => 
-    d.nps !== null || 
-    d.feedback_learned || 
+  // Filter to records that have actual response data
+  // Different survey types have different fields:
+  // - end_of_program/feedback: nps, feedback_learned, feedback_insight, wellbeing_*
+  // - first_session: coach_satisfaction, match_experience
+  // - touchpoint: nps, feedback
+  const filteredData = allData.filter(d =>
+    d.nps !== null ||
+    d.feedback_learned ||
     d.feedback_insight ||
     d.wellbeing_satisfaction !== null ||
     d.wellbeing_productivity !== null ||
-    d.wellbeing_balance !== null
+    d.wellbeing_balance !== null ||
+    // First session survey fields
+    d.coach_satisfaction !== null ||
+    d.match_experience !== null
   );
 
   // Map to legacy SurveyResponse format
@@ -368,6 +377,8 @@ export const getSurveyResponses = async (filter?: CompanyFilter): Promise<Survey
     wellbeing_satisfaction: d.wellbeing_satisfaction,
     wellbeing_productivity: d.wellbeing_productivity,
     wellbeing_balance: d.wellbeing_balance,
+    // First session survey fields
+    match_experience: d.match_experience,
   })) as SurveyResponse[];
 };
 
@@ -411,7 +422,12 @@ export const getWelcomeSurveyData = async (filter?: CompanyFilter): Promise<Welc
     age_range: d.age_range,
     tenure: d.tenure,
     years_experience: d.years_experience,
-    previous_coaching: d.previous_coaching ? '1' : '0',
+    // Normalize previous_coaching: handle 1, 1.0, '1', '1.0', true, 'Yes' → '1'; 0, 0.0, '0', '0.0', false, 'No' → '0'
+    previous_coaching: d.previous_coaching === null || d.previous_coaching === undefined
+      ? null
+      : (Number(d.previous_coaching) === 1 || d.previous_coaching === true || d.previous_coaching === 'Yes' || d.previous_coaching === 'yes')
+        ? '1'
+        : '0',
     coaching_goals: d.coaching_goals,
     program_title: d.program_title,
     account_name: d.account,
@@ -431,10 +447,16 @@ export const getWelcomeSurveyScaleData = async (filter?: CompanyFilter): Promise
     .select('*');
 
   // Apply company filter
-  if (filter?.companyId) {
+  // Note: welcome_survey_scale uses 'account' column for filtering
+  // IMPORTANT: company_id is unreliable in this table (multiple companies share same ID)
+  // So we prefer filtering by account name when available
+  if (filter?.accountName) {
+    query = query.ilike('account', `%${filter.accountName}%`);
+  } else if (filter?.companyName) {
+    query = query.ilike('account', `%${filter.companyName}%`);
+  } else if (filter?.companyId) {
+    // Fallback to company_id only if no name available (less reliable)
     query = query.eq('company_id', filter.companyId);
-  } else if (filter?.accountName) {
-    query = query.ilike('account_name', `%${filter.accountName}%`);
   }
 
   const { data, error } = await query;
@@ -445,7 +467,34 @@ export const getWelcomeSurveyScaleData = async (filter?: CompanyFilter): Promise
     return [];
   }
 
-  return data as WelcomeSurveyEntry[];
+  // Normalize data to match WelcomeSurveyEntry format (same as GROW data)
+  return data.map((d: any) => ({
+    ...d,
+    email: d.email,
+    cohort: d.cohort || d.program_title || '',
+    company: d.company || d.account_name || '',
+    role: d.role,
+    satisfaction: d.satisfaction,
+    productivity: d.productivity,
+    work_life_balance: d.work_life_balance,
+    motivation: d.motivation,
+    inclusion: d.inclusion,
+    age_range: d.age_range,
+    tenure: d.tenure,
+    years_experience: d.years_experience,
+    // Normalize previous_coaching: convert various formats to '1' (Yes), '0' (No), or null (Unknown)
+    // Handle: 1, 1.0, '1', '1.0', true, 'Yes', 'yes' → '1'
+    // Handle: 0, 0.0, '0', '0.0', false, 'No', 'no' → '0'
+    previous_coaching: d.previous_coaching === null || d.previous_coaching === undefined
+      ? null
+      : (Number(d.previous_coaching) === 1 || d.previous_coaching === true || d.previous_coaching === 'Yes' || d.previous_coaching === 'yes')
+        ? '1'
+        : '0',
+    coaching_goals: d.coaching_goals,
+    program_title: d.program_title,
+    account_name: d.account_name,
+    company_id: d.company_id,
+  })) as WelcomeSurveyEntry[];
 };
 
 /**
@@ -565,25 +614,146 @@ export const buildCompanyFilter = (
   accountName?: string,
   companyName?: string
 ): CompanyFilter => {
+  // Clean company name for fallback use
+  const cleanedCompanyName = companyName
+    ? companyName.split(' - ')[0].replace(/\s+(SCALE|GROW|EXEC)$/i, '').trim()
+    : undefined;
+
   // Multi-location account: user has specific account_name
   if (accountName) {
-    return { accountName };
+    return { accountName, companyName: cleanedCompanyName };
   }
-  
+
   // Single company account: use company_id
+  // Also include companyName as fallback for tables with unreliable company_id
   if (companyId) {
-    return { companyId };
+    return { companyId, companyName: cleanedCompanyName };
   }
-  
-  // Fallback: use company name with cleaning
-  if (companyName) {
-    const cleanName = companyName
-      .split(' - ')[0]
-      .replace(/\s+(SCALE|GROW|EXEC)$/i, '')
-      .trim();
-    return { accountName: cleanName };
+
+  // Fallback: use company name with partial matching
+  if (cleanedCompanyName) {
+    return { accountName: cleanedCompanyName, companyName: cleanedCompanyName };
   }
   
   // No filter - will return all data (should not happen in practice)
   return {};
+};
+
+// ============================================
+// LOOKUP TABLE QUERIES (Source of Truth)
+// ============================================
+
+export interface Company {
+  id: string;
+  name: string;
+  slug: string;
+  program_type?: string;
+  is_active?: boolean;
+}
+
+export interface Program {
+  id: string;
+  company_id: string;
+  name: string;
+  program_type?: 'GROW' | 'SCALE' | 'EXEC';
+  salesforce_id?: string;
+}
+
+/**
+ * Fetches all companies from the lookup table.
+ */
+export const getCompanies = async (): Promise<Company[]> => {
+  const { data, error } = await supabase
+    .from('companies')
+    .select('*')
+    .eq('is_active', true)
+    .order('name');
+
+  if (error) {
+    console.error('Error fetching companies:', error);
+    Sentry.captureException(error, { tags: { query: 'getCompanies' } });
+    return [];
+  }
+
+  return data as Company[];
+};
+
+/**
+ * Fetches programs for a specific company from the lookup table.
+ */
+export const getPrograms = async (companyId?: string, companyName?: string): Promise<Program[]> => {
+  // If filtering by company name, first find matching company IDs
+  if (companyName && !companyId) {
+    const { data: companies } = await supabase
+      .from('companies')
+      .select('id')
+      .ilike('name', `%${companyName}%`);
+
+    if (!companies || companies.length === 0) {
+      console.log('No companies found matching:', companyName);
+      return [];
+    }
+
+    const companyIds = companies.map(c => c.id);
+
+    const { data, error } = await supabase
+      .from('programs')
+      .select('*')
+      .in('company_id', companyIds)
+      .order('name');
+
+    if (error) {
+      console.error('Error fetching programs:', error);
+      Sentry.captureException(error, { tags: { query: 'getPrograms' } });
+      return [];
+    }
+
+    return data as Program[];
+  }
+
+  // Direct company_id filter
+  let query = supabase
+    .from('programs')
+    .select('*')
+    .order('name');
+
+  if (companyId) {
+    query = query.eq('company_id', companyId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error fetching programs:', error);
+    Sentry.captureException(error, { tags: { query: 'getPrograms' } });
+    return [];
+  }
+
+  return data as Program[];
+};
+
+/**
+ * Fetches programs for dropdown by company name.
+ * Returns sorted by employee count (requires joining with employee_manager).
+ */
+export const getProgramsForDropdown = async (companyName: string, programType?: 'GROW' | 'SCALE'): Promise<string[]> => {
+  let query = supabase
+    .from('programs')
+    .select('name, program_type, companies!inner(name)')
+    .ilike('companies.name', `%${companyName}%`)
+    .order('name');
+
+  if (programType) {
+    query = query.eq('program_type', programType);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error fetching programs for dropdown:', error);
+    Sentry.captureException(error, { tags: { query: 'getProgramsForDropdown' } });
+    return [];
+  }
+
+  return data?.map(p => p.name) || [];
 };

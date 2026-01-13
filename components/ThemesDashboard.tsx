@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { isAdminEmail } from '../constants';
 import { getDashboardSessions, getProgramConfig, CompanyFilter, buildCompanyFilter } from '../lib/dataFetcher';
 import { SessionWithEmployee, ProgramConfig } from '../types';
 import { supabase } from '../lib/supabaseClient';
@@ -41,8 +42,7 @@ const ThemesDashboard: React.FC = () => {
         // Get company from auth
         const { data: { session } } = await supabase.auth.getSession();
         const email = session?.user?.email || '';
-        const ADMIN_EMAILS = ['asimmons@boon-health.com', 'alexsimm95@gmail.com', 'hello@boon-health.com'];
-        const isAdmin = ADMIN_EMAILS.includes(email?.toLowerCase());
+        const isAdmin = isAdminEmail(email);
         
         let company = session?.user?.app_metadata?.company || '';
         let companyId = session?.user?.app_metadata?.company_id || '';
@@ -54,7 +54,7 @@ const ThemesDashboard: React.FC = () => {
             const stored = localStorage.getItem('boon_admin_company_override');
             if (stored) {
               const override = JSON.parse(stored);
-              company = override.name;
+              company = override.account_name;
               companyId = override.id || companyId;
               accName = override.account_name || accName;
             }
@@ -510,16 +510,21 @@ const ThemeTrendChart = ({ data }: { data: any[] }) => {
           const x = getCoordinates(i);
           const isHovered = hoverIndex === i;
 
+          // Only show x-axis labels at appropriate intervals to prevent overlap
+          // Show every Nth label based on data length
+          const labelInterval = data.length <= 12 ? 1 : data.length <= 24 ? 2 : data.length <= 36 ? 3 : Math.ceil(data.length / 12);
+          const showLabel = i % labelInterval === 0 || i === data.length - 1 || isHovered;
+
           return (
             <g key={i} onMouseEnter={() => setHoverIndex(i)} onMouseLeave={() => setHoverIndex(null)}>
               {/* Invisible touch target column */}
               <rect x={x - (graphWidth / data.length / 2)} y={paddingY} width={graphWidth / data.length} height={graphHeight} fill="transparent" />
-              
+
               {/* Vertical line indicator */}
-              <line 
-                x1={x} y1={paddingY} x2={x} y2={height - paddingY} 
-                stroke="#E5E7EB" 
-                strokeWidth="1" 
+              <line
+                x1={x} y1={paddingY} x2={x} y2={height - paddingY}
+                stroke="#E5E7EB"
+                strokeWidth="1"
                 strokeDasharray="4 4"
                 className={`transition-opacity duration-200 ${isHovered ? 'opacity-100' : 'opacity-0'}`}
               />
@@ -530,23 +535,25 @@ const ThemeTrendChart = ({ data }: { data: any[] }) => {
                  const val = d[key];
                  const y = height - paddingY - (val / 100) * graphHeight;
                  return (
-                   <circle 
-                    key={key} 
-                    cx={x} cy={y} 
-                    r={isHovered ? 6 : 4} 
-                    fill="white" stroke={color} strokeWidth="3" 
+                   <circle
+                    key={key}
+                    cx={x} cy={y}
+                    r={isHovered ? 6 : 4}
+                    fill="white" stroke={color} strokeWidth="3"
                     className="transition-all duration-200"
                    />
                  );
               })}
 
-              {/* X-Axis Label */}
-              <text 
-                x={x} y={height - 10} textAnchor="middle" 
-                className={`text-xs font-bold uppercase tracking-wider transition-colors ${isHovered ? 'fill-boon-dark' : 'fill-gray-400'}`}
-              >
-                {d.label}
-              </text>
+              {/* X-Axis Label - only show at intervals to prevent overlap */}
+              {showLabel && (
+                <text
+                  x={x} y={height - 10} textAnchor="middle"
+                  className={`text-xs font-bold uppercase tracking-wider transition-colors ${isHovered ? 'fill-boon-dark' : 'fill-gray-400'}`}
+                >
+                  {d.label}
+                </text>
+              )}
             </g>
           );
         })}

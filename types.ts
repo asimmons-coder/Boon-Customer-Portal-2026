@@ -204,7 +204,11 @@ export interface CompetencyScore {
 
 /**
  * Survey response - used by dashboard components
- * Maps from SurveySubmission with survey_type='end_of_program'
+ * Maps from SurveySubmission with various survey_type values:
+ * - end_of_program: nps, feedback_*, wellbeing_*
+ * - feedback: nps, feedback_*
+ * - first_session: coach_satisfaction, match_experience
+ * - touchpoint: nps
  */
 export interface SurveyResponse {
   email: string;
@@ -217,6 +221,13 @@ export interface SurveyResponse {
   program_title?: string;
   account_name?: string;
   company_id?: string;
+  survey_type?: string;
+  // Wellbeing fields (end_of_program surveys)
+  wellbeing_satisfaction?: number;
+  wellbeing_productivity?: number;
+  wellbeing_balance?: number;
+  // First session survey fields
+  match_experience?: number;
 }
 
 /**

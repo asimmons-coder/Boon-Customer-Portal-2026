@@ -1,4 +1,4 @@
-import { ADMIN_EMAILS } from '../constants';
+import { isAdminEmail } from '../constants';
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
@@ -11,16 +11,18 @@ import {
   AnimatedProgressBar,
   SkeletonDashboard
 } from './Animations';
-import { 
-  getDashboardSessions, 
-  getCompetencyScores, 
-  getSurveyResponses, 
+import {
+  getDashboardSessions,
+  getCompetencyScores,
+  getSurveyResponses,
   getEmployeeRoster,
   getWelcomeSurveyData,
   getProgramConfig,
   getFocusAreaSelections,
+  getPrograms,
   CompanyFilter,
-  buildCompanyFilter
+  buildCompanyFilter,
+  Program
 } from '../lib/dataFetcher';
 import { 
   SessionWithEmployee, 
@@ -68,6 +70,7 @@ const HomeDashboard: React.FC = () => {
   const [baselineData, setBaselineData] = useState<WelcomeSurveyEntry[]>([]);
   const [focusAreas, setFocusAreas] = useState<FocusAreaSelection[]>([]);
   const [programConfig, setProgramConfig] = useState<ProgramConfig[]>([]);
+  const [programsLookup, setProgramsLookup] = useState<Program[]>([]);
   const [companyName, setCompanyName] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [accountName, setAccountName] = useState('');
@@ -87,17 +90,7 @@ const HomeDashboard: React.FC = () => {
         // Fetch Auth Session for Company Name and First Name
         const { data: { session } } = await supabase.auth.getSession();
         const email = session?.user?.email || '';
-        // ADMIN_EMAILS imported from constants
-        const isAdmin = ADMIN_EMAILS.includes(email?.toLowerCase());
-        
-        // DEBUG - admin check
-        console.log('DEBUG ADMIN CHECK:', {
-          email,
-          emailLower: email?.toLowerCase(),
-          isAdmin,
-          ADMIN_EMAILS_length: ADMIN_EMAILS.length,
-          ADMIN_EMAILS: ADMIN_EMAILS
-        });
+        const isAdmin = isAdminEmail(email);
         
         let company = session?.user?.app_metadata?.company || '';
         let compId = session?.user?.app_metadata?.company_id || '';
@@ -114,7 +107,7 @@ const HomeDashboard: React.FC = () => {
             if (stored) {
               const override = JSON.parse(stored);
               console.log('DEBUG OVERRIDE parsed:', override);
-              company = override.name;
+              company = override.account_name;
               compId = override.id || compId;
               accName = override.account_name || accName;
             }
@@ -146,7 +139,7 @@ const HomeDashboard: React.FC = () => {
 
         console.log('HomeDashboard using company filter:', companyFilter);
 
-        const [sessData, compData, survData, empData, baseData, focusData, configData, benchmarkData] = await Promise.all([
+        const [sessData, compData, survData, empData, baseData, focusData, configData, benchmarkData, programsData] = await Promise.all([
           getDashboardSessions(companyFilter),
           getCompetencyScores(companyFilter),
           getSurveyResponses(companyFilter),
@@ -154,7 +147,8 @@ const HomeDashboard: React.FC = () => {
           getWelcomeSurveyData(companyFilter),
           getFocusAreaSelections(companyFilter),
           getProgramConfig(companyFilter),
-          supabase.from('boon_benchmarks').select('*').eq('program_type', 'GROW')
+          supabase.from('boon_benchmarks').select('*').eq('program_type', 'GROW'),
+          getPrograms(undefined, accName || company)
         ]);
 
         // Fetch welcome survey completions for utilization calculation
@@ -256,6 +250,7 @@ const HomeDashboard: React.FC = () => {
         setBaselineData(filteredBaseline);
         setFocusAreas(filteredFocusAreas);
         setProgramConfig(filteredConfig);
+        setProgramsLookup(programsData);
         
         // Fallback to data inference if auth metadata is missing
         if (!company && empData.length > 0 && empData[0].company) {
@@ -270,7 +265,7 @@ const HomeDashboard: React.FC = () => {
     fetchData();
   }, []);
 
-  // --- Derived Cohort List (sorted by program start date, most recent first) ---
+  // --- Derived Cohort List (from programs lookup table, sorted by employee count) ---
   const cohorts = useMemo(() => {
     // Build a map of program_title -> start_date from programConfig
     const startDateMap = new Map<string, Date>();
@@ -279,28 +274,29 @@ const HomeDashboard: React.FC = () => {
         startDateMap.set(p.program_title, new Date(p.program_start_date));
       }
     });
-    
-    // Get unique programs from sessions - normalize to display names before deduplication
-    const sessionCohorts = sessions
-      .map(s => {
-        const raw = ((s as any).program_title || s.program_name || s.cohort || s.program || '').trim();
-        return PROGRAM_DISPLAY_NAMES[raw] || raw;  // Convert CP codes to display names
-      })
-      .filter(Boolean) as string[];
-    const unique = Array.from(new Set(sessionCohorts));
-    
-    // Sort by start date (most recent first), then alphabetically for those without dates
-    unique.sort((a, b) => {
-      const dateA = startDateMap.get(a);
-      const dateB = startDateMap.get(b);
-      if (dateA && dateB) return dateB.getTime() - dateA.getTime();
-      if (dateA) return -1; // a has date, b doesn't -> a first
-      if (dateB) return 1;  // b has date, a doesn't -> b first
-      return a.localeCompare(b); // Both no dates -> alphabetical
+
+    // Count employees per program for sorting
+    const programCounts = new Map<string, number>();
+    employees.forEach(e => {
+      const pt = (e as any).program_title || (e as any).coaching_program;
+      if (pt) {
+        programCounts.set(pt, (programCounts.get(pt) || 0) + 1);
+      }
     });
-    
-    return ['All Cohorts', ...unique];
-  }, [sessions, programConfig]);
+
+    // Use programs from lookup table
+    const programNames = programsLookup.map(p => p.name);
+
+    // Sort by employee count (most to least), then alphabetically
+    programNames.sort((a, b) => {
+      const countA = programCounts.get(a) || 0;
+      const countB = programCounts.get(b) || 0;
+      if (countB !== countA) return countB - countA;
+      return a.localeCompare(b);
+    });
+
+    return ['All Cohorts', ...programNames];
+  }, [programsLookup, programConfig, employees]);
 
   const handleCohortChange = (cohort: string) => {
     setSearchParams({ cohort });

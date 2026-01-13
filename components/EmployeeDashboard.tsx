@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { isAdminEmail } from '../constants';
 import { supabase } from '../lib/supabaseClient';
 import { 
   Users, 
@@ -61,8 +62,7 @@ const EmployeeDashboard: React.FC = () => {
         // Get company name from user metadata
         const { data: { session } } = await supabase.auth.getSession();
         const email = session?.user?.email || '';
-        const ADMIN_EMAILS = ['asimmons@boon-health.com', 'alexsimm95@gmail.com', 'hello@boon-health.com'];
-        const isAdmin = ADMIN_EMAILS.includes(email?.toLowerCase());
+        const isAdmin = isAdminEmail(email);
         
         let company = session?.user?.app_metadata?.company || '';
         let compId = session?.user?.app_metadata?.company_id || '';
@@ -74,7 +74,7 @@ const EmployeeDashboard: React.FC = () => {
             const stored = localStorage.getItem('boon_admin_company_override');
             if (stored) {
               const override = JSON.parse(stored);
-              company = override.name;
+              company = override.account_name;
               compId = override.id || compId;
               accName = override.account_name || accName;
             }
@@ -176,9 +176,18 @@ const EmployeeDashboard: React.FC = () => {
       });
   }, [employees, searchTerm, filterProgram, sortField, sortDirection]);
 
-  // Stats
-  const activeCount = employees.filter(e => e.status !== 'Inactive' && !e.end_date).length;
-  const inactiveCount = employees.filter(e => e.status === 'Inactive' || e.end_date).length;
+  // Stats - filter by program selection (not search term) so stats reflect the selected program
+  const programFilteredEmployees = useMemo(() => {
+    if (filterProgram === 'All') return employees;
+    return employees.filter(emp => {
+      const empProgram = emp.program_title || emp.program;
+      return empProgram === filterProgram;
+    });
+  }, [employees, filterProgram]);
+
+  const totalCount = programFilteredEmployees.length;
+  const activeCount = programFilteredEmployees.filter(e => e.status !== 'Inactive' && !e.end_date).length;
+  const inactiveCount = programFilteredEmployees.filter(e => e.status === 'Inactive' || e.end_date).length;
 
   const handleSort = (field: keyof Employee) => {
     if (sortField === field) {
@@ -302,7 +311,7 @@ const EmployeeDashboard: React.FC = () => {
             </div>
             <div>
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Total Employees</p>
-              <p className="text-3xl font-black text-boon-dark">{employees.length}</p>
+              <p className="text-3xl font-black text-boon-dark">{totalCount}</p>
             </div>
           </div>
         </div>

@@ -2,7 +2,7 @@ import * as Sentry from "@sentry/react";
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import { supabase } from './lib/supabaseClient';
-import { ADMIN_EMAILS } from './constants';
+import { isAdminEmail } from './constants';
 import LoginPage from './components/LoginPage'; 
 import ResetPasswordPage from './components/ResetPasswordPage';
 import ProtectedRoute from './components/ProtectedRoute'; 
@@ -62,50 +62,93 @@ const getDisplayName = (program: string): string => {
 // --- Admin Company Switcher ---
 const ADMIN_COMPANY_KEY = 'boon_admin_company_override';
 
-const AdminCompanySwitcher: React.FC<{ 
+interface CompanyOverride {
+  account_name: string;
+  programType: 'GROW' | 'Scale';
+  employeeCount?: number;
+}
+
+const AdminCompanySwitcher: React.FC<{
   currentCompany: string;
   onCompanyChange: (company: string, programType: 'GROW' | 'Scale') => void;
 }> = ({ currentCompany, onCompanyChange }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [companies, setCompanies] = useState<{name: string, programType: 'GROW' | 'Scale'}[]>([]);
+  const [companies, setCompanies] = useState<CompanyOverride[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    // Fetch distinct account_names from session_tracking (the actual values used for filtering)
+    // Fetch all distinct account_names from session_tracking
     const fetchCompanies = async () => {
-      const { data } = await supabase
-        .from('session_tracking')
-        .select('account_name, program_title')
-        .order('account_name');
-      
-      if (data) {
-        // Get unique account_names with their program type
-        const uniqueMap = new Map<string, 'GROW' | 'Scale'>();
-        data.forEach(row => {
-          if (row.account_name && !uniqueMap.has(row.account_name)) {
-            const isScale = row.program_title?.toUpperCase().includes('SCALE') || 
-                           row.account_name?.toUpperCase().includes('SCALE');
-            uniqueMap.set(row.account_name, isScale ? 'Scale' : 'GROW');
+      console.log('AdminSwitcher: Starting to fetch companies...');
+
+      // Paginate to get ALL records (Supabase defaults to 1000)
+      let allData: any[] = [];
+      let from = 0;
+      const pageSize = 1000;
+
+      while (true) {
+        const { data, error } = await supabase
+          .from('session_tracking')
+          .select('account_name, program_title')
+          .order('account_name')
+          .range(from, from + pageSize - 1);
+
+        if (error) {
+          console.error('AdminSwitcher: Query error:', error);
+          break;
+        }
+
+        if (!data || data.length === 0) {
+          console.log('AdminSwitcher: No more data at offset', from);
+          break;
+        }
+
+        console.log(`AdminSwitcher: Got ${data.length} rows at offset ${from}`);
+        allData = [...allData, ...data];
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      console.log(`AdminSwitcher: Total rows fetched: ${allData.length}`);
+
+      if (allData.length > 0) {
+        // Get unique account_names with their program type and employee count
+        const uniqueMap = new Map<string, { programType: 'GROW' | 'Scale', count: number }>();
+        allData.forEach(row => {
+          if (row.account_name) {
+            const existing = uniqueMap.get(row.account_name);
+            if (existing) {
+              existing.count++;
+            } else {
+              const isScale = row.program_title?.toUpperCase().includes('SCALE') ||
+                             row.account_name?.toUpperCase().includes('SCALE');
+              uniqueMap.set(row.account_name, { programType: isScale ? 'Scale' : 'GROW', count: 1 });
+            }
           }
         });
-        
-        const companyList = Array.from(uniqueMap.entries()).map(([name, programType]) => ({
-          name,
-          programType
+
+        const companyList = Array.from(uniqueMap.entries()).map(([account_name, data]) => ({
+          account_name,
+          programType: data.programType,
+          employeeCount: data.count
         }));
-        setCompanies(companyList.sort((a, b) => a.name.localeCompare(b.name)));
+        // Sort by employee count (most to least)
+        setCompanies(companyList.sort((a, b) => b.employeeCount - a.employeeCount));
+        console.log(`AdminSwitcher: Loaded ${companyList.length} unique companies`);
+      } else {
+        console.warn('AdminSwitcher: No companies found - check RLS policies on session_tracking');
       }
     };
     fetchCompanies();
   }, []);
 
-  const filteredCompanies = companies.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredCompanies = companies.filter(c =>
+    c.account_name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleSelect = (company: {name: string, programType: 'GROW' | 'Scale'}) => {
+  const handleSelect = (company: CompanyOverride) => {
     localStorage.setItem(ADMIN_COMPANY_KEY, JSON.stringify(company));
-    onCompanyChange(company.name, company.programType);
+    onCompanyChange(company.account_name, company.programType);
     setIsOpen(false);
     setSearchTerm('');
   };
@@ -137,17 +180,20 @@ const AdminCompanySwitcher: React.FC<{
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300"
               autoFocus
             />
+            <div className="text-[10px] text-gray-400 mt-1 px-1">
+              {searchTerm ? `${filteredCompanies.length} of ${companies.length}` : `${companies.length} accounts`}
+            </div>
           </div>
-          <div className="max-h-64 overflow-y-auto">
-            {filteredCompanies.slice(0, 30).map((company) => (
+          <div className="max-h-96 overflow-y-auto">
+            {filteredCompanies.map((company) => (
               <button
-                key={company.name}
+                key={company.account_name}
                 onClick={() => handleSelect(company)}
                 className={`w-full px-4 py-2 text-left text-sm hover:bg-amber-50 flex items-center justify-between ${
-                  currentCompany === company.name ? 'bg-amber-100 font-bold' : ''
+                  currentCompany === company.account_name ? 'bg-amber-100 font-bold' : ''
                 }`}
               >
-                <span className="truncate">{company.name}</span>
+                <span className="truncate">{company.account_name}</span>
                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
                   company.programType === 'Scale' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
                 }`}>
@@ -212,7 +258,7 @@ const MainPortalLayout: React.FC = () => {
         const email = session?.user?.email || '';
         setUserEmail(email);
         
-        const adminUser = ADMIN_EMAILS.includes(email?.toLowerCase());
+        const adminUser = isAdminEmail(email);
         setIsAdmin(adminUser);
         
         // Check if user is a manager (has employees reporting to them)
@@ -236,8 +282,8 @@ const MainPortalLayout: React.FC = () => {
           try {
             const stored = localStorage.getItem(ADMIN_COMPANY_KEY);
             if (stored) {
-              const override = JSON.parse(stored);
-              company = override.name;
+              const override = JSON.parse(stored) as CompanyOverride;
+              company = override.account_name;
               programTypeFromMeta = override.programType;
             }
           } catch {}
@@ -707,4 +753,4 @@ const App = Sentry.withErrorBoundary(AppContent, {
   ),
 });
 
-export default App;
+export default App;// Trigger rebuild

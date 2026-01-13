@@ -1,13 +1,16 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { isAdminEmail } from '../constants';
 import { supabase } from '../lib/supabaseClient';
-import { 
-  getDashboardSessions, 
-  getSurveyResponses, 
+import {
+  getDashboardSessions,
+  getSurveyResponses,
   getEmployeeRoster,
   getWelcomeSurveyScaleData,
+  getPrograms,
   CompanyFilter,
-  buildCompanyFilter
+  buildCompanyFilter,
+  Program
 } from '../lib/dataFetcher';
 import { 
   SessionWithEmployee, 
@@ -72,6 +75,7 @@ const ScaleDashboard: React.FC = () => {
   const [surveys, setSurveys] = useState<SurveyResponse[]>([]);
   const [welcomeSurveys, setWelcomeSurveys] = useState<any[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [programsLookup, setProgramsLookup] = useState<Program[]>([]);
   const [loading, setLoading] = useState(true);
   const [companyName, setCompanyName] = useState('');
   const [companyId, setCompanyId] = useState('');
@@ -85,8 +89,7 @@ const ScaleDashboard: React.FC = () => {
         setLoading(true);
         const { data: { session } } = await supabase.auth.getSession();
         const email = session?.user?.email || '';
-        const ADMIN_EMAILS = ['asimmons@boon-health.com', 'alexsimm95@gmail.com', 'hello@boon-health.com'];
-        const isAdmin = ADMIN_EMAILS.includes(email?.toLowerCase());
+        const isAdmin = isAdminEmail(email);
         
         let company = session?.user?.app_metadata?.company || '';
         let compId = session?.user?.app_metadata?.company_id || '';
@@ -98,7 +101,7 @@ const ScaleDashboard: React.FC = () => {
             const stored = localStorage.getItem('boon_admin_company_override');
             if (stored) {
               const override = JSON.parse(stored);
-              company = override.name;
+              company = override.account_name;
               compId = override.id || compId;
               accName = override.account_name || accName;
             }
@@ -116,16 +119,18 @@ const ScaleDashboard: React.FC = () => {
 
         console.log('ScaleDashboard using company filter:', companyFilter);
 
-        const [sessData, survData, empData, welcomeData] = await Promise.all([
+        const [sessData, survData, empData, welcomeData, programsData] = await Promise.all([
           getDashboardSessions(companyFilter),
           getSurveyResponses(companyFilter),
           getEmployeeRoster(companyFilter),
-          getWelcomeSurveyScaleData(companyFilter)
+          getWelcomeSurveyScaleData(companyFilter),
+          getPrograms(undefined, accName || company)
         ]);
         setSessions(sessData);
         setSurveys(survData);
         setEmployees(empData);
         setWelcomeSurveys(welcomeData);
+        setProgramsLookup(programsData);
       } catch (err) {
         console.error("Scale Dashboard Error:", err);
       } finally {
@@ -144,15 +149,31 @@ const ScaleDashboard: React.FC = () => {
     setProgramDropdownOpen(false);
   };
 
-  // Get unique programs from sessions
+  // Get programs from lookup table, sorted by employee count
   const availablePrograms = useMemo(() => {
-    const programs = new Set<string>();
-    sessions.forEach(s => {
-      const pt = (s as any).program_title;
-      if (pt) programs.add(pt);
+    // Count employees per program for sorting
+    const programCounts = new Map<string, number>();
+
+    employees.forEach(e => {
+      const pt = (e as any).program_title || (e as any).coaching_program;
+      if (pt) {
+        programCounts.set(pt, (programCounts.get(pt) || 0) + 1);
+      }
     });
-    return ['All Programs', ...Array.from(programs).sort()];
-  }, [sessions]);
+
+    // Use programs from lookup table, sorted by employee count
+    const programNames = programsLookup.map(p => p.name);
+
+    // Sort by employee count (descending), then alphabetically
+    programNames.sort((a, b) => {
+      const countA = programCounts.get(a) || 0;
+      const countB = programCounts.get(b) || 0;
+      if (countB !== countA) return countB - countA;
+      return a.localeCompare(b);
+    });
+
+    return ['All Programs', ...programNames];
+  }, [programsLookup, employees]);
 
   const metrics = useMemo(() => {
     if (loading) return null;
@@ -198,6 +219,14 @@ const ScaleDashboard: React.FC = () => {
     eligibleEmployees.forEach(e => {
       const name = normalize(e.employee_name || e.full_name || e.name || `${e.first_name} ${e.last_name}`);
       if (name) employeeLookup.set(name, e);
+    });
+
+    // Build survey role lookup by email as fallback for missing employee_manager roles
+    const surveyRoleLookup = new Map<string, string>();
+    programFilteredWelcomeSurveys.forEach((s: any) => {
+      if (s.email && s.role) {
+        surveyRoleLookup.set(normalize(s.email), s.role);
+      }
     });
 
     // Include only sessions that actually happened (exclude scheduled and coach no show)
@@ -304,7 +333,14 @@ const ScaleDashboard: React.FC = () => {
       monthSessions.forEach(s => {
         const empName = normalize(s.employee_name || '');
         const employee = employeeLookup.get(empName);
-        const jobTitle = employee?.company_role || employee?.job_title;
+        let jobTitle = employee?.company_role || employee?.job_title;
+
+        // Fallback to welcome survey role if employee_manager doesn't have role data
+        if (!jobTitle && employee?.company_email) {
+          const surveyRole = surveyRoleLookup.get(normalize(employee.company_email));
+          if (surveyRole) jobTitle = surveyRole;
+        }
+
         const role = categorizeRole(jobTitle);
         roles[role] = (roles[role] || 0) + 1;
       });
@@ -761,6 +797,7 @@ const ScaleDashboard: React.FC = () => {
           companyId={companyId}
           programType="SCALE"
           timeWindowDays={windowDays}
+          selectedProgram={selectedProgram}
           totalSessions={aiInsightsData.totalSessions}
           uniqueParticipants={aiInsightsData.uniqueParticipants}
           adoptionRate={aiInsightsData.adoptionRate}

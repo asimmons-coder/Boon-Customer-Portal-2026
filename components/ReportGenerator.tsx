@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { isAdminEmail } from '../constants';
 import { supabase } from '../lib/supabaseClient';
 import { getDashboardSessions, getCompetencyScores, getSurveyResponses, getProgramConfig, CompanyFilter, buildCompanyFilter } from '../lib/dataFetcher';
 import { FileDown, Loader2, X } from 'lucide-react';
@@ -51,8 +52,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
       // Get company info from auth
       const { data: { session } } = await supabase.auth.getSession();
       const email = session?.user?.email || '';
-      const ADMIN_EMAILS = ['asimmons@boon-health.com', 'alexsimm95@gmail.com', 'hello@boon-health.com'];
-      const isAdmin = ADMIN_EMAILS.includes(email?.toLowerCase());
+      const isAdmin = isAdminEmail(email);
       
       let company = session?.user?.app_metadata?.company || '';
       let companyId = session?.user?.app_metadata?.company_id || '';
@@ -64,7 +64,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
           const stored = localStorage.getItem('boon_admin_company_override');
           if (stored) {
             const override = JSON.parse(stored);
-            company = override.name;
+            company = override.account_name;
             companyId = override.id || companyId;
             accName = override.account_name || accName;
           }
@@ -99,8 +99,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
   const fetchReportData = async (): Promise<ReportData> => {
     const { data: { session } } = await supabase.auth.getSession();
     const email = session?.user?.email || '';
-    const ADMIN_EMAILS = ['asimmons@boon-health.com', 'alexsimm95@gmail.com', 'hello@boon-health.com'];
-    const isAdmin = ADMIN_EMAILS.includes(email?.toLowerCase());
+    const isAdmin = isAdminEmail(email);
     
     let company = session?.user?.app_metadata?.company || '';
     let companyId = session?.user?.app_metadata?.company_id || '';
@@ -112,7 +111,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
         const stored = localStorage.getItem('boon_admin_company_override');
         if (stored) {
           const override = JSON.parse(stored);
-          company = override.name;
+          company = override.account_name;
           companyId = override.id || companyId;
           accName = override.account_name || accName;
         }

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { getWelcomeSurveyData, getProgramConfig, getFocusAreaSelections, getBaselineCompetencyScores, CompanyFilter, buildCompanyFilter } from '../lib/dataFetcher';
-import { WelcomeSurveyEntry, ProgramConfig, FocusAreaSelection, CompetencyScoreRecord } from '../types';
+import { isAdminEmail } from '../constants';
+import { getWelcomeSurveyData, getWelcomeSurveyScaleData, getProgramConfig, getFocusAreaSelections, getBaselineCompetencyScores, getEmployeeRoster, getPrograms, CompanyFilter, buildCompanyFilter, Program } from '../lib/dataFetcher';
+import { WelcomeSurveyEntry, ProgramConfig, FocusAreaSelection, CompetencyScoreRecord, Employee } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import ExecutiveSignals from './ExecutiveSignals';
 import { 
@@ -21,12 +22,16 @@ import {
 
 const BaselineDashboard: React.FC = () => {
   const [data, setData] = useState<WelcomeSurveyEntry[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [focusAreas, setFocusAreas] = useState<FocusAreaSelection[]>([]);
   const [baselineCompetencies, setBaselineCompetencies] = useState<CompetencyScoreRecord[]>([]);
   const [programConfig, setProgramConfig] = useState<ProgramConfig[]>([]);
+  const [programsLookup, setProgramsLookup] = useState<Program[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedCohort, setSelectedCohort] = useState('All Cohorts');
+  const [selectedCohort, setSelectedCohort] = useState('All Programs');
+  const [companyName, setCompanyName] = useState('');
+  const [accountName, setAccountName] = useState('');
   const [boonAverages, setBoonAverages] = useState<{satisfaction: number, productivity: number, work_life_balance: number}>({
     satisfaction: 0, productivity: 0, work_life_balance: 0
   });
@@ -42,8 +47,7 @@ const BaselineDashboard: React.FC = () => {
         // Get company from auth
         const { data: { session } } = await supabase.auth.getSession();
         const email = session?.user?.email || '';
-        const ADMIN_EMAILS = ['asimmons@boon-health.com', 'alexsimm95@gmail.com', 'hello@boon-health.com'];
-        const isAdmin = ADMIN_EMAILS.includes(email?.toLowerCase());
+        const isAdmin = isAdminEmail(email);
         
         let company = session?.user?.app_metadata?.company || '';
         let companyId = session?.user?.app_metadata?.company_id || '';
@@ -55,7 +59,7 @@ const BaselineDashboard: React.FC = () => {
             const stored = localStorage.getItem('boon_admin_company_override');
             if (stored) {
               const override = JSON.parse(stored);
-              company = override.name;
+              company = override.account_name;
               companyId = override.id || companyId;
               accName = override.account_name || accName;
             }
@@ -66,33 +70,51 @@ const BaselineDashboard: React.FC = () => {
         const companyFilter = buildCompanyFilter(companyId, accName, company);
 
         console.log('BaselineDashboard using company filter:', companyFilter);
-        
-        const [result, focusData, competencyData, configData, benchmarkData] = await Promise.all([
+
+        setCompanyName(company);
+        setAccountName(accName);
+
+        const [growData, scaleData, empData, focusData, competencyData, configData, benchmarkData, programsData] = await Promise.all([
           getWelcomeSurveyData(companyFilter),
+          getWelcomeSurveyScaleData(companyFilter),
+          getEmployeeRoster(companyFilter),
           getFocusAreaSelections(companyFilter),
           getBaselineCompetencyScores(companyFilter),
           getProgramConfig(companyFilter),
-          supabase.from('boon_benchmarks').select('*').eq('program_type', 'GROW')
+          supabase.from('boon_benchmarks').select('*').eq('program_type', 'SCALE'),
+          getPrograms(undefined, accName || company)
         ]);
-        
+
+        // Combine data from both GROW and SCALE welcome surveys
+        const result = [...growData, ...scaleData];
+
         // Get Boon benchmarks from table (use GROW benchmarks for baseline comparison)
         const benchmarks = benchmarkData.data || [];
         const getBenchmark = (metric: string) => {
           const row = benchmarks.find((b: any) => b.metric_name === metric);
           return row ? Number(row.avg_value) : 0;
         };
-        
+
         setBoonAverages({
           satisfaction: getBenchmark('baseline_satisfaction'),
           productivity: getBenchmark('baseline_productivity'),
           work_life_balance: getBenchmark('baseline_work_life_balance')
         });
-        
+
         // Data is already filtered by company at the query level
+        console.log('BaselineDashboard data loaded:', {
+          surveys: result.length,
+          employees: empData.length,
+          programs: programsData.length,
+          programNames: programsData.map(p => p.name),
+          companyFilter: accName || company
+        });
         setData(result);
+        setEmployees(empData);
         setFocusAreas(focusData);
         setBaselineCompetencies(competencyData);
         setProgramConfig(configData);
+        setProgramsLookup(programsData);
       } catch (err: any) {
         setError(err.message || 'Failed to load survey data');
       } finally {
@@ -103,35 +125,67 @@ const BaselineDashboard: React.FC = () => {
   }, []);
 
   const { filteredData, cohorts, stats } = useMemo(() => {
-    // Build start date map for sorting
-    const startDateMap = new Map<string, Date>();
-    programConfig.forEach(p => {
-      if (p.program_title && p.program_start_date) {
-        startDateMap.set(p.program_title, new Date(p.program_start_date));
+    // Count employees per program for sorting
+    const programCounts = new Map<string, number>();
+    employees.forEach(e => {
+      const pt = (e as any).program_title || (e as any).coaching_program;
+      if (pt) {
+        programCounts.set(pt, (programCounts.get(pt) || 0) + 1);
       }
     });
-    
-    // Extract unique cohorts from program_title (preferred) or cohort field - trim whitespace
-    const programTitles = data
-      .map(d => ((d as any).program_title || d.cohort || '').trim())
-      .filter(Boolean) as string[];
-    const uniquePrograms = Array.from(new Set(programTitles));
-    
-    // Sort by start date (most recent first)
-    uniquePrograms.sort((a, b) => {
-      const dateA = startDateMap.get(a);
-      const dateB = startDateMap.get(b);
-      if (dateA && dateB) return dateB.getTime() - dateA.getTime();
-      if (dateA) return -1;
-      if (dateB) return 1;
+
+    // Extract programs from multiple sources:
+    // 1. Programs lookup table
+    // 2. Employee manager data (program_title)
+    // 3. Survey data (program_title, cohort)
+    const programSet = new Set<string>();
+
+    // From lookup table
+    programsLookup.forEach(p => {
+      if (p.name) programSet.add(p.name);
+    });
+
+    // From employees
+    employees.forEach(e => {
+      const pt = (e as any).program_title || (e as any).coaching_program;
+      if (pt && typeof pt === 'string' && pt.trim()) {
+        programSet.add(pt.trim());
+      }
+    });
+
+    // From survey data
+    data.forEach(d => {
+      const pt = (d as any).program_title || (d as any).cohort;
+      if (pt && typeof pt === 'string' && pt.trim()) {
+        programSet.add(pt.trim());
+      }
+    });
+
+    // Convert to array and sort by employee count (descending)
+    const programNames = Array.from(programSet);
+    programNames.sort((a, b) => {
+      const countA = programCounts.get(a) || 0;
+      const countB = programCounts.get(b) || 0;
+      if (countB !== countA) return countB - countA;
       return a.localeCompare(b);
     });
-    
-    const uniqueCohorts = ['All Cohorts', ...uniquePrograms];
+
+    // Debug: log program extraction results
+    console.log('BaselineDashboard programs extracted:', {
+      fromLookup: programsLookup.length,
+      fromEmployees: employees.length,
+      fromSurveyData: data.length,
+      programSet: Array.from(programSet),
+      sampleEmployee: employees[0] ? { program_title: (employees[0] as any).program_title, coaching_program: (employees[0] as any).coaching_program } : null,
+      sampleSurvey: data[0] ? { program_title: (data[0] as any).program_title, cohort: (data[0] as any).cohort } : null,
+      previous_coaching_sample: data.slice(0, 5).map(d => (d as any).previous_coaching)
+    });
+
+    const uniqueCohorts = ['All Programs', ...programNames];
 
     // Filter by program_title or cohort
-    const filtered = selectedCohort === 'All Cohorts' 
-      ? data 
+    const filtered = selectedCohort === 'All Programs'
+      ? data
       : data.filter(d => {
           const pt = (d as any).program_title || d.cohort || '';
           return pt === selectedCohort;
@@ -173,7 +227,7 @@ const BaselineDashboard: React.FC = () => {
     // 3. Competencies (Average) from competency_scores table - keep on 1-5 scale
     // Filter competencies by the same cohort filter
     const cohortCompetencies = baselineCompetencies.filter(c => {
-      if (selectedCohort === 'All Cohorts') return true;
+      if (selectedCohort === 'All Programs') return true;
       const pt = (c.program_title || '').toLowerCase();
       return pt === selectedCohort.toLowerCase();
     });
@@ -204,7 +258,21 @@ const BaselineDashboard: React.FC = () => {
     const getDistribution = (field: string) => {
       const counts: Record<string, number> = {};
       filtered.forEach(d => {
-        const val = d[field] || 'Unknown';
+        let val = d[field];
+
+        // Normalize previous_coaching values (0.0/1.0 → No/Yes)
+        if (field === 'previous_coaching') {
+          if (val === 0 || val === 0.0 || val === '0' || val === '0.0' || val === false || val === 'false' || val === 'No' || val === 'no') {
+            val = 'No';
+          } else if (val === 1 || val === 1.0 || val === '1' || val === '1.0' || val === true || val === 'true' || val === 'Yes' || val === 'yes') {
+            val = 'Yes';
+          } else {
+            val = 'Unknown';
+          }
+        } else {
+          val = val || 'Unknown';
+        }
+
         counts[val] = (counts[val] || 0) + 1;
       });
       return Object.entries(counts)
@@ -215,10 +283,10 @@ const BaselineDashboard: React.FC = () => {
             if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
             return b[1] - a[1]; // default frequency sort
         })
-        .map(([label, count]) => ({ 
-          label, 
-          count, 
-          pct: (count / filtered.length) * 100 
+        .map(([label, count]) => ({
+          label,
+          count,
+          pct: (count / filtered.length) * 100
         }));
     };
 
@@ -447,7 +515,7 @@ const BaselineDashboard: React.FC = () => {
         subTopics: analyzeSubTopics(filtered)
       }
     };
-  }, [data, selectedCohort, programConfig, baselineCompetencies]);
+  }, [data, employees, selectedCohort, programsLookup, baselineCompetencies]);
 
   if (loading) {
      return (
@@ -756,11 +824,12 @@ const DemographicCard = ({ title, data }: { title: string, data: { label: string
     
     if (!hasRealData && data.length > 0) return null;
     
-    // Format labels for Previous Coaching
+    // Format labels for Previous Coaching - handle multiple formats
     const formatLabel = (label: string, cardTitle: string) => {
         if (cardTitle === 'Previous Coaching') {
-            if (label === '0') return 'No prior coaching';
-            if (label === '1') return 'Has prior coaching';
+            const lower = label.toLowerCase();
+            if (label === '0' || lower === 'no' || lower === 'false') return 'No';
+            if (label === '1' || lower === 'yes' || lower === 'true') return 'Yes';
         }
         return label;
     };
