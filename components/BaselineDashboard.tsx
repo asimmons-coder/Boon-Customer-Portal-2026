@@ -88,18 +88,23 @@ const BaselineDashboard: React.FC = () => {
         // Combine data from both GROW and SCALE welcome surveys
         const result = [...growData, ...scaleData];
 
-        // Get Boon benchmarks from table (use GROW benchmarks for baseline comparison)
+        // Get Boon benchmarks from table (use SCALE benchmarks for baseline comparison)
         const benchmarks = benchmarkData.data || [];
         const getBenchmark = (metric: string) => {
           const row = benchmarks.find((b: any) => b.metric_name === metric);
-          return row ? Number(row.avg_value) : 0;
+          if (!row) return 0;
+          const val = Number(row.avg_value);
+          // Scale benchmarks to 10-point scale if they're on 5-point scale
+          return val <= 5.5 ? val * 2 : val;
         };
 
-        setBoonAverages({
+        const boonAvgs = {
           satisfaction: getBenchmark('baseline_satisfaction'),
           productivity: getBenchmark('baseline_productivity'),
           work_life_balance: getBenchmark('baseline_work_life_balance')
-        });
+        };
+        console.log('Boon benchmarks loaded:', { raw: benchmarks, scaled: boonAvgs });
+        setBoonAverages(boonAvgs);
 
         // Data is already filtered by company at the query level
         console.log('BaselineDashboard data loaded:', {
@@ -214,13 +219,13 @@ const BaselineDashboard: React.FC = () => {
     const wellbeingAvgs = wellbeingKeys.map(key => {
       const validValues = filtered.map(d => Number(d[key])).filter(v => !isNaN(v) && v > 0);
       if (validValues.length === 0) return { key, label: key.replace(/_/g, ' '), value: 0, hasData: false };
-      
+
       const avg = validValues.reduce((a, b) => a + b, 0) / validValues.length;
-      
-      // Check if data is on 1-5 scale (max value <= 5) and scale to 1-10
-      const maxVal = Math.max(...validValues);
-      const scaledAvg = maxVal <= 5 ? avg * 2 : avg;
-      
+
+      // Check if data is on 1-5 scale and scale to 1-10
+      // Use average <= 5.5 as indicator (more robust than max, handles outliers)
+      const scaledAvg = avg <= 5.5 ? avg * 2 : avg;
+
       return { key, label: key.replace(/_/g, ' '), value: scaledAvg, hasData: true };
     });
 
@@ -818,11 +823,11 @@ const KPICard = ({ title, value, icon, color, textColor, subtext, isText, benchm
 };
 
 const DemographicCard = ({ title, data }: { title: string, data: { label: string, count: number, pct: number }[] }) => {
-    // Hide card if only "Unknown" at 100%
-    const hasRealData = data.some(item => item.label !== 'Unknown') || 
-                        (data.length === 1 && data[0].label === 'Unknown' && data[0].pct < 100);
-    
-    if (!hasRealData && data.length > 0) return null;
+    // Hide card if "Unknown" is >= 90% (not useful data)
+    const unknownItem = data.find(item => item.label === 'Unknown');
+    const unknownPct = unknownItem?.pct || 0;
+
+    if (unknownPct >= 90) return null;
     
     // Format labels for Previous Coaching - handle multiple formats
     const formatLabel = (label: string, cardTitle: string) => {
