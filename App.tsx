@@ -65,6 +65,7 @@ const ADMIN_COMPANY_KEY = 'boon_admin_company_override';
 interface CompanyOverride {
   account_name: string;
   programType: 'GROW' | 'Scale';
+  employeeCount?: number;
 }
 
 const AdminCompanySwitcher: React.FC<{
@@ -111,21 +112,28 @@ const AdminCompanySwitcher: React.FC<{
       console.log(`AdminSwitcher: Total rows fetched: ${allData.length}`);
 
       if (allData.length > 0) {
-        // Get unique account_names with their program type
-        const uniqueMap = new Map<string, 'GROW' | 'Scale'>();
+        // Get unique account_names with their program type and employee count
+        const uniqueMap = new Map<string, { programType: 'GROW' | 'Scale', count: number }>();
         allData.forEach(row => {
-          if (row.account_name && !uniqueMap.has(row.account_name)) {
-            const isScale = row.program_title?.toUpperCase().includes('SCALE') ||
-                           row.account_name?.toUpperCase().includes('SCALE');
-            uniqueMap.set(row.account_name, isScale ? 'Scale' : 'GROW');
+          if (row.account_name) {
+            const existing = uniqueMap.get(row.account_name);
+            if (existing) {
+              existing.count++;
+            } else {
+              const isScale = row.program_title?.toUpperCase().includes('SCALE') ||
+                             row.account_name?.toUpperCase().includes('SCALE');
+              uniqueMap.set(row.account_name, { programType: isScale ? 'Scale' : 'GROW', count: 1 });
+            }
           }
         });
 
-        const companyList = Array.from(uniqueMap.entries()).map(([account_name, programType]) => ({
+        const companyList = Array.from(uniqueMap.entries()).map(([account_name, data]) => ({
           account_name,
-          programType
+          programType: data.programType,
+          employeeCount: data.count
         }));
-        setCompanies(companyList.sort((a, b) => a.account_name.localeCompare(b.account_name)));
+        // Sort by employee count (most to least)
+        setCompanies(companyList.sort((a, b) => b.employeeCount - a.employeeCount));
         console.log(`AdminSwitcher: Loaded ${companyList.length} unique companies`);
       } else {
         console.warn('AdminSwitcher: No companies found - check RLS policies on session_tracking');
