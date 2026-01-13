@@ -261,6 +261,7 @@ const HomeDashboard: React.FC = () => {
   }, []);
 
   // --- Derived Cohort List (sorted by program start date, most recent first) ---
+  // Filter to only include cohorts for the current company
   const cohorts = useMemo(() => {
     // Build a map of program_title -> start_date from programConfig
     const startDateMap = new Map<string, Date>();
@@ -271,33 +272,50 @@ const HomeDashboard: React.FC = () => {
     });
 
     const allCohorts = new Set<string>();
+    const normalize = (s: string) => (s || '').toLowerCase().trim();
+    const currentAccount = normalize(
+      accountName ||
+      companyName.split(' - ')[0].replace(/\s+(SCALE|GROW|EXEC)$/i, '').trim()
+    );
 
-    // Add cohorts from sessions
+    // Helper to check if a record belongs to the current company
+    const matchesCompany = (acctName: string | undefined | null): boolean => {
+      if (!currentAccount) return true; // No filter if no company set
+      if (!acctName) return false;
+      const normalized = normalize(acctName);
+      return normalized.includes(currentAccount) || currentAccount.includes(normalized.split(' ')[0]);
+    };
+
+    // Add cohorts from sessions (filtered by company)
     sessions.forEach(s => {
       const raw = ((s as any).program_title || s.program_name || s.cohort || s.program || '').trim();
       const normalized = PROGRAM_DISPLAY_NAMES[raw] || raw;
-      if (normalized) allCohorts.add(normalized);
+      const acct = (s as any).account_name;
+      if (normalized && matchesCompany(acct)) allCohorts.add(normalized);
     });
 
-    // Add cohorts from employee roster (includes cohorts without sessions yet)
+    // Add cohorts from employee roster (filtered by company)
     employees.forEach(e => {
       const raw = ((e as any).program_title || (e as any).program_name || e.cohort || e.program || '').trim();
       const normalized = PROGRAM_DISPLAY_NAMES[raw] || raw;
-      if (normalized) allCohorts.add(normalized);
+      const acct = (e as any).account_name || (e as any).company_name || (e as any).company;
+      if (normalized && matchesCompany(acct)) allCohorts.add(normalized);
     });
 
-    // Add cohorts from welcome surveys
+    // Add cohorts from welcome surveys (filtered by company)
     welcomeSurveys.forEach(w => {
       const raw = (w.program_title || '').trim();
       const normalized = PROGRAM_DISPLAY_NAMES[raw] || raw;
-      if (normalized) allCohorts.add(normalized);
+      const acct = (w as any).account || (w as any).account_name;
+      if (normalized && matchesCompany(acct)) allCohorts.add(normalized);
     });
 
-    // Add cohorts from program config
+    // Add cohorts from program config (filtered by company)
     programConfig.forEach(p => {
       const raw = (p.program_title || '').trim();
       const normalized = PROGRAM_DISPLAY_NAMES[raw] || raw;
-      if (normalized) allCohorts.add(normalized);
+      const acct = (p as any).account_name;
+      if (normalized && matchesCompany(acct)) allCohorts.add(normalized);
     });
 
     const unique = Array.from(allCohorts);
@@ -313,7 +331,7 @@ const HomeDashboard: React.FC = () => {
     });
 
     return ['All Cohorts', ...unique];
-  }, [sessions, employees, welcomeSurveys, programConfig]);
+  }, [sessions, employees, welcomeSurveys, programConfig, accountName, companyName]);
 
   const handleCohortChange = (cohort: string) => {
     setSearchParams({ cohort });

@@ -145,25 +145,43 @@ const ScaleDashboard: React.FC = () => {
   };
 
   // Get unique programs from sessions AND employees (to include programs without sessions yet)
+  // Filter to only include programs for the current company
   const availablePrograms = useMemo(() => {
     const programs = new Set<string>();
-    // Add programs from session_tracking
+    const normalize = (s: string) => s?.toLowerCase().trim() || '';
+    const currentAccount = normalize(
+      accountName ||
+      companyName.split(' - ')[0].replace(/\s+(SCALE|GROW|EXEC)$/i, '').trim()
+    );
+
+    // Helper to check if a record belongs to the current company
+    const matchesCompany = (acctName: string | undefined | null): boolean => {
+      if (!currentAccount) return true; // No filter if no company set
+      if (!acctName) return false;
+      const normalized = normalize(acctName);
+      return normalized.includes(currentAccount) || currentAccount.includes(normalized.split(' ')[0]);
+    };
+
+    // Add programs from session_tracking (filtered by company)
     sessions.forEach(s => {
       const pt = (s as any).program_title;
-      if (pt) programs.add(pt);
+      const acct = (s as any).account_name;
+      if (pt && matchesCompany(acct)) programs.add(pt);
     });
-    // Also add programs from employee_manager (includes programs without sessions)
+    // Also add programs from employee_manager (filtered by company)
     employees.forEach(e => {
       const pt = (e as any).program_title || (e as any).coaching_program;
-      if (pt) programs.add(pt);
+      const acct = (e as any).account_name || e.company_name || e.company;
+      if (pt && matchesCompany(acct)) programs.add(pt);
     });
-    // Also add programs from welcome_survey_scale
+    // Also add programs from welcome_survey_scale (filtered by company)
     welcomeSurveys.forEach(w => {
       const pt = w.program_title;
-      if (pt) programs.add(pt);
+      const acct = w.account_name;
+      if (pt && matchesCompany(acct)) programs.add(pt);
     });
     return ['All Programs', ...Array.from(programs).sort()];
-  }, [sessions, employees, welcomeSurveys]);
+  }, [sessions, employees, welcomeSurveys, accountName, companyName]);
 
   const metrics = useMemo(() => {
     if (loading) return null;
