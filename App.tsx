@@ -2,7 +2,7 @@ import * as Sentry from "@sentry/react";
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import { supabase } from './lib/supabaseClient';
-import { ADMIN_EMAILS } from './constants';
+import { isAdminEmail } from './constants';
 import LoginPage from './components/LoginPage'; 
 import ResetPasswordPage from './components/ResetPasswordPage';
 import ProtectedRoute from './components/ProtectedRoute'; 
@@ -212,7 +212,7 @@ const MainPortalLayout: React.FC = () => {
         const email = session?.user?.email || '';
         setUserEmail(email);
         
-        const adminUser = ADMIN_EMAILS.includes(email?.toLowerCase());
+        const adminUser = isAdminEmail(email);
         setIsAdmin(adminUser);
         
         // Check if user is a manager (has employees reporting to them)

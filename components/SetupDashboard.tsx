@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { isAdminEmail } from '../constants';
 import { supabase } from '../lib/supabaseClient';
 import { ChevronRight, Calendar, Upload, Download, ExternalLink, CheckCircle2, Clock, Users, MessageSquare, FileText, Shield, CreditCard, Rocket, X, Copy, Mail, Check, Eye, Info, Database } from 'lucide-react';
 
@@ -180,8 +181,7 @@ const SetupDashboard: React.FC = () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const email = session?.user?.email || '';
-        const ADMIN_EMAILS = ['asimmons@boon-health.com', 'alexsimm95@gmail.com', 'hello@boon-health.com'];
-        const isAdmin = ADMIN_EMAILS.includes(email?.toLowerCase());
+        const isAdmin = isAdminEmail(email);
         
         let company = session?.user?.app_metadata?.company || '';
         let compId = session?.user?.app_metadata?.company_id || '';

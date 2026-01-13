@@ -1,4 +1,4 @@
-import { ADMIN_EMAILS } from '../constants';
+import { isAdminEmail } from '../constants';
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
@@ -87,17 +87,7 @@ const HomeDashboard: React.FC = () => {
         // Fetch Auth Session for Company Name and First Name
         const { data: { session } } = await supabase.auth.getSession();
         const email = session?.user?.email || '';
-        // ADMIN_EMAILS imported from constants
-        const isAdmin = ADMIN_EMAILS.includes(email?.toLowerCase());
-        
-        // DEBUG - admin check
-        console.log('DEBUG ADMIN CHECK:', {
-          email,
-          emailLower: email?.toLowerCase(),
-          isAdmin,
-          ADMIN_EMAILS_length: ADMIN_EMAILS.length,
-          ADMIN_EMAILS: ADMIN_EMAILS
-        });
+        const isAdmin = isAdminEmail(email);
         
         let company = session?.user?.app_metadata?.company || '';
         let compId = session?.user?.app_metadata?.company_id || '';

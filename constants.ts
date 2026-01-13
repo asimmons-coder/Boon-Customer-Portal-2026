@@ -1,16 +1,11 @@
 
 import { SessionWithEmployee, Employee } from './types';
 
-// Centralized admin email list - users who can switch between companies
-export const ADMIN_EMAILS = [
-  'asimmons@boon-health.com',
-  'alexsimm95@gmail.com',
-  'hello@boon-health.com',
-  'zragland@boon-health.com',
-  'canderson@boon-health.com',
-  'anewman@boon-health.com',
-  'chenrichs@boon-health.com',
-];
+// Admin check - any @boon-health.com email can switch between companies
+export const isAdminEmail = (email: string | null | undefined): boolean => {
+  if (!email) return false;
+  return email.toLowerCase().endsWith('@boon-health.com');
+};
 
 export const MOCK_EMPLOYEES: Employee[] = [
   { id: 1, first_name: 'Alice', last_name: 'Johnson', email: 'alice@example.com', program: 'Engineering', avatar_url: 'https://picsum.photos/seed/alice/100/100', full_name: 'Alice Johnson' },

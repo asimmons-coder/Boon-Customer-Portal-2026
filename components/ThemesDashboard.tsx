@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { isAdminEmail } from '../constants';
 import { getDashboardSessions, getProgramConfig, CompanyFilter, buildCompanyFilter } from '../lib/dataFetcher';
 import { SessionWithEmployee, ProgramConfig } from '../types';
 import { supabase } from '../lib/supabaseClient';
@@ -41,8 +42,7 @@ const ThemesDashboard: React.FC = () => {
         // Get company from auth
         const { data: { session } } = await supabase.auth.getSession();
         const email = session?.user?.email || '';
-        const ADMIN_EMAILS = ['asimmons@boon-health.com', 'alexsimm95@gmail.com', 'hello@boon-health.com'];
-        const isAdmin = ADMIN_EMAILS.includes(email?.toLowerCase());
+        const isAdmin = isAdminEmail(email);
         
         let company = session?.user?.app_metadata?.company || '';
         let companyId = session?.user?.app_metadata?.company_id || '';
