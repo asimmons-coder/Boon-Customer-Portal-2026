@@ -54,8 +54,9 @@ export const getEmployeeRoster = async (filter?: CompanyFilter): Promise<Employe
 
   // Apply company filter at query level
   // For multi-location: accountName takes precedence if set
+  // Note: employee_manager uses 'company_name' not 'account_name'
   if (filter?.accountName) {
-    query = query.ilike('account_name', `%${filter.accountName}%`);
+    query = query.ilike('company_name', `%${filter.accountName}%`);
   } else if (filter?.companyId) {
     query = query.eq('company_id', filter.companyId);
   }
