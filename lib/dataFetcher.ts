@@ -446,17 +446,14 @@ export const getWelcomeSurveyScaleData = async (filter?: CompanyFilter): Promise
     .from('welcome_survey_scale')
     .select('*');
 
-  // Apply company filter
-  // Note: welcome_survey_scale uses 'account' column for filtering
-  // IMPORTANT: company_id is unreliable in this table (multiple companies share same ID)
-  // So we prefer filtering by account name when available
-  if (filter?.accountName) {
+  // Apply company filter - company_id is the primary/reliable filter
+  // Note: welcome_survey_scale uses 'account' column for name filtering
+  if (filter?.companyId) {
+    query = query.eq('company_id', filter.companyId);
+  } else if (filter?.accountName) {
     query = query.ilike('account', `%${filter.accountName}%`);
   } else if (filter?.companyName) {
     query = query.ilike('account', `%${filter.companyName}%`);
-  } else if (filter?.companyId) {
-    // Fallback to company_id only if no name available (less reliable)
-    query = query.eq('company_id', filter.companyId);
   }
 
   const { data, error } = await query;
@@ -619,15 +616,19 @@ export const buildCompanyFilter = (
     ? companyName.split(' - ')[0].replace(/\s+(SCALE|GROW|EXEC)$/i, '').trim()
     : undefined;
 
-  // Multi-location account: user has specific account_name
-  if (accountName) {
-    return { accountName, companyName: cleanedCompanyName };
+  // ALWAYS include companyId when available - it's the most reliable filter
+  // accountName is secondary for multi-location filtering/display
+  if (companyId) {
+    return {
+      companyId,
+      accountName: accountName || undefined,
+      companyName: cleanedCompanyName
+    };
   }
 
-  // Single company account: use company_id
-  // Also include companyName as fallback for tables with unreliable company_id
-  if (companyId) {
-    return { companyId, companyName: cleanedCompanyName };
+  // Fallback: no companyId available, use accountName
+  if (accountName) {
+    return { accountName, companyName: cleanedCompanyName };
   }
 
   // Fallback: use company name with partial matching
