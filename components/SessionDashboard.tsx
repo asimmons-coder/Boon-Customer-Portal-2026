@@ -514,12 +514,16 @@ const SessionDashboard: React.FC<SessionDashboardProps> = ({ filterType, filterV
       if (name.toLowerCase() === 'kimberly genes') return;
       if (session.employee_id && hiddenEmployees.has(String(session.employee_id))) return;
       
-      const sessionProgram = (session as any).program_title || session.program_name || session.program || '';
+      // Use ONLY program_title for accurate filtering (matches HomeDashboard)
+      const sessionProgram = (session as any).program_title || '';
       const sessionCohort = session.cohort || session.program_name || '';
 
+      // Normalize for case-insensitive comparison
+      const normalizeStr = (s: string) => (s || '').toLowerCase().trim();
+
       let includeSession = true;
-      if (filterType === 'program' && sessionProgram !== filterValue) includeSession = false;
-      if (filterType === 'cohort' && sessionCohort !== filterValue) includeSession = false;
+      if (filterType === 'program' && normalizeStr(sessionProgram) !== normalizeStr(filterValue)) includeSession = false;
+      if (filterType === 'cohort' && normalizeStr(sessionCohort) !== normalizeStr(filterValue)) includeSession = false;
 
       // Use email-first matching to find existing entry
       let matchedKey = findMatchingKey(statsMap, email, name);
