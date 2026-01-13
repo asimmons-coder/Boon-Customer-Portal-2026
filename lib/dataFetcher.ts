@@ -437,10 +437,11 @@ export const getWelcomeSurveyScaleData = async (filter?: CompanyFilter): Promise
     .select('*');
 
   // Apply company filter
+  // Note: welcome_survey_scale uses 'account' column, not 'account_name'
   if (filter?.companyId) {
     query = query.eq('company_id', filter.companyId);
   } else if (filter?.accountName) {
-    query = query.ilike('account_name', `%${filter.accountName}%`);
+    query = query.ilike('account', `%${filter.accountName}%`);
   }
 
   const { data, error } = await query;
