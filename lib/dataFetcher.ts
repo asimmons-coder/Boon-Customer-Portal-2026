@@ -412,7 +412,12 @@ export const getWelcomeSurveyData = async (filter?: CompanyFilter): Promise<Welc
     age_range: d.age_range,
     tenure: d.tenure,
     years_experience: d.years_experience,
-    previous_coaching: d.previous_coaching ? '1' : '0',
+    // Normalize previous_coaching: keep null as null (Unknown), true/1/Yes → '1', false/0/No → '0'
+    previous_coaching: d.previous_coaching === null || d.previous_coaching === undefined
+      ? null
+      : (d.previous_coaching === true || d.previous_coaching === 1 || d.previous_coaching === '1' || d.previous_coaching === 'Yes' || d.previous_coaching === 'yes')
+        ? '1'
+        : '0',
     coaching_goals: d.coaching_goals,
     program_title: d.program_title,
     account_name: d.account,
@@ -446,7 +451,32 @@ export const getWelcomeSurveyScaleData = async (filter?: CompanyFilter): Promise
     return [];
   }
 
-  return data as WelcomeSurveyEntry[];
+  // Normalize data to match WelcomeSurveyEntry format (same as GROW data)
+  return data.map((d: any) => ({
+    ...d,
+    email: d.email,
+    cohort: d.cohort || d.program_title || '',
+    company: d.company || d.account_name || '',
+    role: d.role,
+    satisfaction: d.satisfaction,
+    productivity: d.productivity,
+    work_life_balance: d.work_life_balance,
+    motivation: d.motivation,
+    inclusion: d.inclusion,
+    age_range: d.age_range,
+    tenure: d.tenure,
+    years_experience: d.years_experience,
+    // Normalize previous_coaching: convert various formats to '1' (Yes), '0' (No), or null (Unknown)
+    previous_coaching: d.previous_coaching === null || d.previous_coaching === undefined
+      ? null  // Keep null as null (will show as Unknown)
+      : (d.previous_coaching === true || d.previous_coaching === 1 || d.previous_coaching === '1' || d.previous_coaching === 'Yes' || d.previous_coaching === 'yes')
+        ? '1'
+        : '0',
+    coaching_goals: d.coaching_goals,
+    program_title: d.program_title,
+    account_name: d.account_name,
+    company_id: d.company_id,
+  })) as WelcomeSurveyEntry[];
 };
 
 /**

@@ -134,8 +134,35 @@ const BaselineDashboard: React.FC = () => {
       }
     });
 
-    // Use programs from lookup table, sorted by employee count
-    const programNames = programsLookup.map(p => p.name);
+    // Extract programs from multiple sources:
+    // 1. Programs lookup table
+    // 2. Employee manager data (program_title)
+    // 3. Survey data (program_title, cohort)
+    const programSet = new Set<string>();
+
+    // From lookup table
+    programsLookup.forEach(p => {
+      if (p.name) programSet.add(p.name);
+    });
+
+    // From employees
+    employees.forEach(e => {
+      const pt = (e as any).program_title || (e as any).coaching_program;
+      if (pt && typeof pt === 'string' && pt.trim()) {
+        programSet.add(pt.trim());
+      }
+    });
+
+    // From survey data
+    data.forEach(d => {
+      const pt = (d as any).program_title || (d as any).cohort;
+      if (pt && typeof pt === 'string' && pt.trim()) {
+        programSet.add(pt.trim());
+      }
+    });
+
+    // Convert to array and sort by employee count (descending)
+    const programNames = Array.from(programSet);
     programNames.sort((a, b) => {
       const countA = programCounts.get(a) || 0;
       const countB = programCounts.get(b) || 0;
