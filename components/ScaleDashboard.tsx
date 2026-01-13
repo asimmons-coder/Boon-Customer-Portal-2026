@@ -102,7 +102,7 @@ const ScaleDashboard: React.FC = () => {
             if (stored) {
               const override = JSON.parse(stored);
               company = override.account_name;
-              compId = override.id || compId;
+              compId = override.company_id || compId;
               accName = override.account_name || accName;
             }
           } catch {}
