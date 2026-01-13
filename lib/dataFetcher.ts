@@ -343,14 +343,21 @@ export const getSurveyResponses = async (filter?: CompanyFilter): Promise<Survey
     from += pageSize;
   }
 
-  // Filter to records that have NPS OR feedback OR wellbeing data
-  const filteredData = allData.filter(d => 
-    d.nps !== null || 
-    d.feedback_learned || 
+  // Filter to records that have actual response data
+  // Different survey types have different fields:
+  // - end_of_program/feedback: nps, feedback_learned, feedback_insight, wellbeing_*
+  // - first_session: coach_satisfaction, match_experience
+  // - touchpoint: nps, feedback
+  const filteredData = allData.filter(d =>
+    d.nps !== null ||
+    d.feedback_learned ||
     d.feedback_insight ||
     d.wellbeing_satisfaction !== null ||
     d.wellbeing_productivity !== null ||
-    d.wellbeing_balance !== null
+    d.wellbeing_balance !== null ||
+    // First session survey fields
+    d.coach_satisfaction !== null ||
+    d.match_experience !== null
   );
 
   // Map to legacy SurveyResponse format
@@ -369,6 +376,8 @@ export const getSurveyResponses = async (filter?: CompanyFilter): Promise<Survey
     wellbeing_satisfaction: d.wellbeing_satisfaction,
     wellbeing_productivity: d.wellbeing_productivity,
     wellbeing_balance: d.wellbeing_balance,
+    // First session survey fields
+    match_experience: d.match_experience,
   })) as SurveyResponse[];
 };
 
