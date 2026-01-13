@@ -116,6 +116,20 @@ const ScaleBaselineDashboard: React.FC = () => {
         const data = await getWelcomeSurveyScaleData(companyFilter);
         setSurveyData(data as unknown as ScaleWelcomeSurvey[]);
 
+        // DEBUG: Check previous_coaching values
+        const pcValues = data.map((d: any) => d.previous_coaching);
+        const uniquePcValues = [...new Set(pcValues)];
+        console.log('DEBUG previous_coaching unique values:', uniquePcValues);
+        console.log('DEBUG previous_coaching sample (first 10):', pcValues.slice(0, 10));
+        console.log('DEBUG previous_coaching counts:', {
+          total: pcValues.length,
+          null: pcValues.filter(v => v === null).length,
+          undefined: pcValues.filter(v => v === undefined).length,
+          one: pcValues.filter(v => v === '1' || v === 1).length,
+          zero: pcValues.filter(v => v === '0' || v === 0).length,
+          other: pcValues.filter(v => v !== null && v !== undefined && v !== '1' && v !== 1 && v !== '0' && v !== 0).length
+        });
+
         // Extract unique programs from survey data
         const uniquePrograms = new Set<string>();
         data.forEach((d: any) => {

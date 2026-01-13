@@ -452,6 +452,12 @@ export const getWelcomeSurveyScaleData = async (filter?: CompanyFilter): Promise
     return [];
   }
 
+  // DEBUG: Check raw previous_coaching values before normalization
+  const rawPcValues = data.map((d: any) => d.previous_coaching);
+  const uniqueRaw = [...new Set(rawPcValues.map((v: any) => `${v} (type: ${typeof v})`))];
+  console.log('DEBUG RAW previous_coaching values from DB:', uniqueRaw);
+  console.log('DEBUG RAW previous_coaching sample:', rawPcValues.slice(0, 5));
+
   // Normalize data to match WelcomeSurveyEntry format (same as GROW data)
   return data.map((d: any) => ({
     ...d,
