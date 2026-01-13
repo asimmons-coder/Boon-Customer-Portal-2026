@@ -176,9 +176,18 @@ const EmployeeDashboard: React.FC = () => {
       });
   }, [employees, searchTerm, filterProgram, sortField, sortDirection]);
 
-  // Stats
-  const activeCount = employees.filter(e => e.status !== 'Inactive' && !e.end_date).length;
-  const inactiveCount = employees.filter(e => e.status === 'Inactive' || e.end_date).length;
+  // Stats - filter by program selection (not search term) so stats reflect the selected program
+  const programFilteredEmployees = useMemo(() => {
+    if (filterProgram === 'All') return employees;
+    return employees.filter(emp => {
+      const empProgram = emp.program_title || emp.program;
+      return empProgram === filterProgram;
+    });
+  }, [employees, filterProgram]);
+
+  const totalCount = programFilteredEmployees.length;
+  const activeCount = programFilteredEmployees.filter(e => e.status !== 'Inactive' && !e.end_date).length;
+  const inactiveCount = programFilteredEmployees.filter(e => e.status === 'Inactive' || e.end_date).length;
 
   const handleSort = (field: keyof Employee) => {
     if (sortField === field) {
@@ -302,7 +311,7 @@ const EmployeeDashboard: React.FC = () => {
             </div>
             <div>
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Total Employees</p>
-              <p className="text-3xl font-black text-boon-dark">{employees.length}</p>
+              <p className="text-3xl font-black text-boon-dark">{totalCount}</p>
             </div>
           </div>
         </div>
