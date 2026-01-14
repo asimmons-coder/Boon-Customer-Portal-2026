@@ -78,19 +78,19 @@ const AdminCompanySwitcher: React.FC<{
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    // Fetch unique employee counts per account_name from session_tracking
-    // Count unique emails (not session rows) to get actual employee counts
+    // Fetch employee counts from employee_manager grouped by company_name
+    // company_name is the account (e.g., "72andSunny"), program_title has the location/program
     const fetchCompanies = async () => {
-      // Paginate to get ALL records (Supabase defaults to 1000)
-      let allData: any[] = [];
+      let allEmployees: any[] = [];
       let from = 0;
       const pageSize = 1000;
 
       while (true) {
         const { data, error } = await supabase
-          .from('session_tracking')
-          .select('account_name, program_title, company_id, email')
-          .order('account_name')
+          .from('employee_manager')
+          .select('company_name, program_title, company_id, company_email')
+          .neq('company_email', 'asimmons@boon-health.com')
+          .order('company_name')
           .range(from, from + pageSize - 1);
 
         if (error) {
@@ -102,51 +102,49 @@ const AdminCompanySwitcher: React.FC<{
           break;
         }
 
-        allData = [...allData, ...data];
+        allEmployees = [...allEmployees, ...data];
         if (data.length < pageSize) break;
         from += pageSize;
       }
 
-      if (allData.length > 0) {
-        // Get unique account_names with their program type and UNIQUE employee count
-        const accountMap = new Map<string, {
+      if (allEmployees.length > 0) {
+        // Group by company_name (the account) and count unique employees
+        const companyMap = new Map<string, {
           programType: 'GROW' | 'Scale',
-          emails: Set<string>,  // Track unique emails
+          emails: Set<string>,
           company_id?: string
         }>();
 
-        allData.forEach(row => {
-          if (row.account_name) {
-            const existing = accountMap.get(row.account_name);
+        allEmployees.forEach(emp => {
+          if (emp.company_name) {
+            const existing = companyMap.get(emp.company_name);
             if (existing) {
-              // Add email to set (automatically dedupes)
-              if (row.email) {
-                existing.emails.add(row.email.toLowerCase());
+              if (emp.company_email) {
+                existing.emails.add(emp.company_email.toLowerCase());
               }
-              // Keep the company_id if we found one
-              if (row.company_id && !existing.company_id) {
-                existing.company_id = row.company_id;
+              if (emp.company_id && !existing.company_id) {
+                existing.company_id = emp.company_id;
               }
             } else {
-              const isScale = row.program_title?.toUpperCase().includes('SCALE') ||
-                             row.account_name?.toUpperCase().includes('SCALE');
+              const isScale = emp.program_title?.toUpperCase().includes('SCALE') ||
+                             emp.company_name?.toUpperCase().includes('SCALE');
               const emails = new Set<string>();
-              if (row.email) {
-                emails.add(row.email.toLowerCase());
+              if (emp.company_email) {
+                emails.add(emp.company_email.toLowerCase());
               }
-              accountMap.set(row.account_name, {
+              companyMap.set(emp.company_name, {
                 programType: isScale ? 'Scale' : 'GROW',
                 emails,
-                company_id: row.company_id
+                company_id: emp.company_id
               });
             }
           }
         });
 
-        const companyList = Array.from(accountMap.entries()).map(([account_name, data]) => ({
-          account_name,
+        const companyList = Array.from(companyMap.entries()).map(([company_name, data]) => ({
+          account_name: company_name,
           programType: data.programType,
-          employeeCount: data.emails.size, // Count unique emails
+          employeeCount: data.emails.size,
           company_id: data.company_id
         }));
         // Sort by employee count (most to least)
