@@ -21,7 +21,7 @@ const TASK_CATEGORIES = [
     label: 'Data Migration',
     icon: Database,
     tasks: [
-      { id: 'migrate_legacy', label: 'Import legacy data from Google Sheets', actionLabel: 'AI Assistant', actionType: 'link', actionUrl: '/import' },
+      { id: 'migrate_legacy', label: 'Import legacy data from Google Sheets (contact your Boon team)', actionLabel: null, actionType: 'checkbox' },
     ]
   },
   {
@@ -139,7 +139,12 @@ const SetupDashboard: React.FC = () => {
     'Building and Leading High-Performing Teams',
     'Influence and Stakeholder Management',
   ]);
-  const [growCompetencies, setGrowCompetencies] = useState<string[]>([]);
+  const [growCompetencies, setGrowCompetencies] = useState<string[]>([
+    'Effective Communication',
+    'Emotional Intelligence',
+    'Time Management and Productivity',
+    'Giving and Receiving Feedback',
+  ]);
   const [execLetEmployeesChoose, setExecLetEmployeesChoose] = useState(false);
   const [growLetEmployeesChoose, setGrowLetEmployeesChoose] = useState(false);
   const [accountTeam, setAccountTeam] = useState<Array<{
@@ -163,6 +168,7 @@ const SetupDashboard: React.FC = () => {
   const [selectedProvider, setSelectedProvider] = useState<'default' | 'microsoft' | 'google'>('default');
   const [copied, setCopied] = useState(false);
   const [tempDate, setTempDate] = useState<string>('');
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   
   // Onboarding data
   const [onboardingData, setOnboardingData] = useState<OnboardingData>({});
@@ -175,6 +181,39 @@ const SetupDashboard: React.FC = () => {
   const [tempEapProvider, setTempEapProvider] = useState('');
   const [tempEapPhone, setTempEapPhone] = useState('');
   const [tempContextNotes, setTempContextNotes] = useState('');
+
+  // Helper function to validate email format
+  const isValidEmail = (email: string): boolean => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  };
+
+  // Show success toast for 2 seconds
+  const showSuccessToast = (message: string) => {
+    setSaveSuccess(message);
+    setTimeout(() => setSaveSuccess(null), 2000);
+  };
+
+  // Auto-expand next incomplete category
+  const expandNextIncompleteCategory = (currentCategoryId: string) => {
+    const currentIndex = TASK_CATEGORIES.findIndex(c => c.id === currentCategoryId);
+    for (let i = currentIndex + 1; i < TASK_CATEGORIES.length; i++) {
+      const category = TASK_CATEGORIES[i];
+      const hasIncomplete = category.tasks.some(t => !taskCompletions[t.id]);
+      if (hasIncomplete) {
+        setExpandedCategory(category.id);
+        return;
+      }
+    }
+    // If no incomplete categories after current, check from beginning
+    for (let i = 0; i < currentIndex; i++) {
+      const category = TASK_CATEGORIES[i];
+      const hasIncomplete = category.tasks.some(t => !taskCompletions[t.id]);
+      if (hasIncomplete) {
+        setExpandedCategory(category.id);
+        return;
+      }
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -304,20 +343,27 @@ const SetupDashboard: React.FC = () => {
     fetchData();
   }, []);
 
-  const saveOnboardingData = async (newData: Partial<OnboardingData>, taskId: string) => {
-    if (!companyId) return;
-    
+  const saveOnboardingData = async (newData: Partial<OnboardingData>, taskId: string): Promise<boolean> => {
+    if (!companyId) return false;
+
     const updatedData = { ...onboardingData, ...newData };
-    setOnboardingData(updatedData);
-    
+
     try {
-      await supabase
+      const { error: updateError } = await supabase
         .from('program_config')
         .update({ onboarding_data: updatedData })
         .eq('company_id', companyId);
-      
+
+      if (updateError) {
+        console.error('Failed to save onboarding data:', updateError);
+        alert('Failed to save. Please try again.');
+        return false;
+      }
+
+      setOnboardingData(updatedData);
+
       // Mark task complete
-      await supabase
+      const { error: taskError } = await supabase
         .from('onboarding_tasks')
         .upsert({
           company_id: companyId,
@@ -325,21 +371,29 @@ const SetupDashboard: React.FC = () => {
           completed: true,
           completed_at: new Date().toISOString(),
         }, { onConflict: 'company_id,task_id' });
-      
+
+      if (taskError) {
+        console.error('Failed to mark task complete:', taskError);
+      }
+
       setTaskCompletions(prev => ({ ...prev, [taskId]: true }));
+      showSuccessToast('Saved successfully');
+      return true;
     } catch (err) {
       console.error('Failed to save onboarding data:', err);
+      alert('Failed to save. Please try again.');
+      return false;
     }
   };
 
   const toggleTask = async (taskId: string) => {
     if (!companyId) return;
-    
+
     const newValue = !taskCompletions[taskId];
     setSaving(taskId);
-    
+
     setTaskCompletions(prev => ({ ...prev, [taskId]: newValue }));
-    
+
     try {
       const { error } = await supabase
         .from('onboarding_tasks')
@@ -351,10 +405,20 @@ const SetupDashboard: React.FC = () => {
         }, {
           onConflict: 'company_id,task_id'
         });
-      
+
       if (error) {
         console.error('Error saving task:', error);
         setTaskCompletions(prev => ({ ...prev, [taskId]: !newValue }));
+      } else if (newValue) {
+        // Check if current category is now complete and auto-expand next
+        const currentCategory = TASK_CATEGORIES.find(c => c.tasks.some(t => t.id === taskId));
+        if (currentCategory) {
+          const updatedCompletions = { ...taskCompletions, [taskId]: true };
+          const categoryComplete = currentCategory.tasks.every(t => updatedCompletions[t.id]);
+          if (categoryComplete) {
+            expandNextIncompleteCategory(currentCategory.id);
+          }
+        }
       }
     } catch (err) {
       console.error('Error toggling task:', err);
@@ -457,8 +521,56 @@ const SetupDashboard: React.FC = () => {
     }
   };
 
+  // Empty state if no programs configured
+  if (!loading && programs.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+          <Rocket size={32} className="text-gray-400" />
+        </div>
+        <h2 className="text-xl font-bold text-gray-900 mb-2">No Programs Configured</h2>
+        <p className="text-gray-500 max-w-md mb-6">
+          Your account doesn't have any programs set up yet. Please contact your Boon team to get started.
+        </p>
+        {accountTeam.length > 0 && accountTeam[0].email && (
+          <a
+            href={`mailto:${accountTeam[0].email}`}
+            className="px-6 py-2.5 bg-boon-blue text-white rounded-lg font-medium hover:bg-boon-darkBlue transition-colors"
+          >
+            Contact {accountTeam[0].name?.split(' ')[0] || 'Your Team'}
+          </a>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-12">
+      {/* Success Toast */}
+      {saveSuccess && (
+        <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-top-2 duration-300">
+          <div className="bg-boon-green text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
+            <CheckCircle2 size={18} />
+            <span className="font-medium">{saveSuccess}</span>
+          </div>
+        </div>
+      )}
+
+      {/* 100% Completion Celebration */}
+      {progressPct === 100 && (
+        <div className="bg-gradient-to-r from-boon-green to-emerald-500 rounded-2xl p-6 text-white shadow-lg">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
+              <CheckCircle2 size={28} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold">All Set! You're Ready to Launch 🎉</h2>
+              <p className="text-white/90 mt-1">Great job completing all setup tasks. Your Boon team will be in touch to confirm your launch date.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div>
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome to Boon! 🎉</h1>
         <p className="text-gray-600">Let's get your coaching program ready to launch. Complete the tasks below and we'll be ready to go.</p>
@@ -537,12 +649,24 @@ const SetupDashboard: React.FC = () => {
                           
                           // Show saved data preview for certain tasks
                           let savedPreview = null;
-                          if (task.id === 'test_emails' && onboardingData.test_emails?.length) {
+                          if (task.id === 'schedule_launch' && launchDate) {
+                            savedPreview = new Date(launchDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                          } else if (task.id === 'test_emails' && onboardingData.test_emails?.length) {
                             savedPreview = onboardingData.test_emails.join(', ');
                           } else if (task.id === 'confirm_comms_channel' && onboardingData.comms_channel) {
                             savedPreview = COMMS_CHANNELS.find(c => c.id === onboardingData.comms_channel)?.label || onboardingData.comms_channel;
                           } else if (task.id === 'invoicing_email' && onboardingData.invoicing_email) {
                             savedPreview = onboardingData.invoicing_email;
+                          } else if (task.id === 'upload_eap' && onboardingData.eap_provider) {
+                            savedPreview = onboardingData.eap_provider + (onboardingData.eap_phone ? ` • ${onboardingData.eap_phone}` : '');
+                          } else if (task.id === 'company_context' && contextNotes) {
+                            savedPreview = contextNotes.length > 50 ? contextNotes.slice(0, 50) + '...' : contextNotes;
+                          } else if (task.id === 'select_focus_areas') {
+                            const totalSelected = (execLetEmployeesChoose ? 0 : execCompetencies.length) + (growLetEmployeesChoose ? 0 : growCompetencies.length);
+                            const employeeChoice = execLetEmployeesChoose || growLetEmployeesChoose;
+                            if (totalSelected > 0 || employeeChoice) {
+                              savedPreview = employeeChoice ? 'Employee choice enabled' : `${totalSelected} topics selected`;
+                            }
                           }
                           
                           return (
@@ -734,24 +858,36 @@ const SetupDashboard: React.FC = () => {
                       const execProgram = programs.find(p => p.type === 'EXEC');
                       if (execProgram) {
                         const execValue = execLetEmployeesChoose ? ['EMPLOYEE_CHOICE'] : execCompetencies;
-                        await supabase
+                        const { error: execError } = await supabase
                           .from('program_config')
                           .update({ selected_competencies: execValue })
                           .eq('company_id', companyId)
                           .eq('program_type', 'EXEC');
+                        if (execError) {
+                          console.error('Failed to save EXEC competencies:', execError);
+                          alert('Failed to save focus areas. Please try again.');
+                          setSaving(null);
+                          return;
+                        }
                       }
-                      
+
                       const growProgram = programs.find(p => p.type === 'GROW');
                       if (growProgram) {
                         const growValue = growLetEmployeesChoose ? ['EMPLOYEE_CHOICE'] : growCompetencies;
-                        await supabase
+                        const { error: growError } = await supabase
                           .from('program_config')
                           .update({ selected_competencies: growValue })
                           .eq('company_id', companyId)
                           .eq('program_type', 'GROW');
+                        if (growError) {
+                          console.error('Failed to save GROW competencies:', growError);
+                          alert('Failed to save focus areas. Please try again.');
+                          setSaving(null);
+                          return;
+                        }
                       }
-                      
-                      await supabase
+
+                      const { error: taskError } = await supabase
                         .from('onboarding_tasks')
                         .upsert({
                           company_id: companyId,
@@ -759,9 +895,14 @@ const SetupDashboard: React.FC = () => {
                           completed: true,
                           completed_at: new Date().toISOString(),
                         }, { onConflict: 'company_id,task_id' });
+                      if (taskError) {
+                        console.error('Failed to mark task complete:', taskError);
+                      }
                       setTaskCompletions(prev => ({ ...prev, select_focus_areas: true }));
+                      showSuccessToast('Focus areas saved');
                     } catch (err) {
                       console.error('Failed to save competencies:', err);
+                      alert('Failed to save focus areas. Please try again.');
                     }
                     setSaving(null);
                   }}
@@ -982,15 +1123,22 @@ const SetupDashboard: React.FC = () => {
               if (!companyId || !tempDate) return;
               setSaving('launchDate');
               try {
-                await supabase
+                const { error: updateError } = await supabase
                   .from('program_config')
                   .update({ launch_date_override: tempDate })
                   .eq('company_id', companyId);
-                
+
+                if (updateError) {
+                  console.error('Failed to update launch date:', updateError);
+                  alert('Failed to save launch date. Please try again.');
+                  setSaving(null);
+                  return;
+                }
+
                 setLaunchDate(tempDate);
                 setShowDateModal(false);
-                
-                await supabase
+
+                const { error: taskError } = await supabase
                   .from('onboarding_tasks')
                   .upsert({
                     company_id: companyId,
@@ -998,9 +1146,14 @@ const SetupDashboard: React.FC = () => {
                     completed: true,
                     completed_at: new Date().toISOString(),
                   }, { onConflict: 'company_id,task_id' });
+                if (taskError) {
+                  console.error('Failed to mark task complete:', taskError);
+                }
                 setTaskCompletions(prev => ({ ...prev, schedule_launch: true }));
+                showSuccessToast('Launch date saved');
               } catch (err) {
                 console.error('Failed to update launch date:', err);
+                alert('Failed to save launch date. Please try again.');
               }
               setSaving(null);
             }}
@@ -1021,8 +1174,13 @@ const SetupDashboard: React.FC = () => {
                 value={tempTestEmail1}
                 onChange={(e) => setTempTestEmail1(e.target.value)}
                 placeholder="email1@company.com"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-boon-blue focus:border-boon-blue"
+                className={`w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-boon-blue focus:border-boon-blue ${
+                  tempTestEmail1 && !isValidEmail(tempTestEmail1) ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                }`}
               />
+              {tempTestEmail1 && !isValidEmail(tempTestEmail1) && (
+                <p className="text-xs text-red-500 mt-1">Please enter a valid email address</p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Test Email 2</label>
@@ -1031,15 +1189,20 @@ const SetupDashboard: React.FC = () => {
                 value={tempTestEmail2}
                 onChange={(e) => setTempTestEmail2(e.target.value)}
                 placeholder="email2@company.com"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-boon-blue focus:border-boon-blue"
+                className={`w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-boon-blue focus:border-boon-blue ${
+                  tempTestEmail2 && !isValidEmail(tempTestEmail2) ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                }`}
               />
+              {tempTestEmail2 && !isValidEmail(tempTestEmail2) && (
+                <p className="text-xs text-red-500 mt-1">Please enter a valid email address</p>
+              )}
             </div>
             <p className="text-xs text-gray-500">We'll send test emails to these addresses to verify Boon emails are landing correctly.</p>
           </div>
           <ModalActions
             onCancel={() => setShowTestEmailsModal(false)}
             onSave={async () => {
-              const emails = [tempTestEmail1, tempTestEmail2].filter(e => e.trim());
+              const emails = [tempTestEmail1, tempTestEmail2].filter(e => e.trim() && isValidEmail(e));
               if (emails.length === 0) return;
               setSaving('testEmails');
               await saveOnboardingData({ test_emails: emails }, 'test_emails');
@@ -1047,7 +1210,7 @@ const SetupDashboard: React.FC = () => {
               setShowTestEmailsModal(false);
             }}
             saveLabel={saving === 'testEmails' ? 'Saving...' : 'Save Emails'}
-            saveDisabled={!tempTestEmail1.trim() || saving === 'testEmails'}
+            saveDisabled={!tempTestEmail1.trim() || !isValidEmail(tempTestEmail1) || (tempTestEmail2.trim() && !isValidEmail(tempTestEmail2)) || saving === 'testEmails'}
           />
         </Modal>
       )}
@@ -1102,21 +1265,26 @@ const SetupDashboard: React.FC = () => {
               value={tempInvoiceEmail}
               onChange={(e) => setTempInvoiceEmail(e.target.value)}
               placeholder="ap@company.com"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-boon-blue focus:border-boon-blue"
+              className={`w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-boon-blue focus:border-boon-blue ${
+                tempInvoiceEmail && !isValidEmail(tempInvoiceEmail) ? 'border-red-300 bg-red-50' : 'border-gray-300'
+              }`}
             />
+            {tempInvoiceEmail && !isValidEmail(tempInvoiceEmail) && (
+              <p className="text-xs text-red-500 mt-1">Please enter a valid email address</p>
+            )}
             <p className="text-xs text-gray-500 mt-2">We'll send all invoices and billing information to this address.</p>
           </div>
           <ModalActions
             onCancel={() => setShowInvoiceModal(false)}
             onSave={async () => {
-              if (!tempInvoiceEmail.trim()) return;
+              if (!tempInvoiceEmail.trim() || !isValidEmail(tempInvoiceEmail)) return;
               setSaving('invoice');
               await saveOnboardingData({ invoicing_email: tempInvoiceEmail }, 'invoicing_email');
               setSaving(null);
               setShowInvoiceModal(false);
             }}
             saveLabel={saving === 'invoice' ? 'Saving...' : 'Save'}
-            saveDisabled={!tempInvoiceEmail.trim() || saving === 'invoice'}
+            saveDisabled={!tempInvoiceEmail.trim() || !isValidEmail(tempInvoiceEmail) || saving === 'invoice'}
           />
         </Modal>
       )}
@@ -1195,14 +1363,21 @@ const SetupDashboard: React.FC = () => {
               if (!companyId) return;
               setSaving('context');
               try {
-                await supabase
+                const { error: updateError } = await supabase
                   .from('program_config')
                   .update({ context_notes: tempContextNotes })
                   .eq('company_id', companyId);
-                
+
+                if (updateError) {
+                  console.error('Failed to save context:', updateError);
+                  alert('Failed to save company context. Please try again.');
+                  setSaving(null);
+                  return;
+                }
+
                 setContextNotes(tempContextNotes);
-                
-                await supabase
+
+                const { error: taskError } = await supabase
                   .from('onboarding_tasks')
                   .upsert({
                     company_id: companyId,
@@ -1210,12 +1385,17 @@ const SetupDashboard: React.FC = () => {
                     completed: true,
                     completed_at: new Date().toISOString(),
                   }, { onConflict: 'company_id,task_id' });
+                if (taskError) {
+                  console.error('Failed to mark task complete:', taskError);
+                }
                 setTaskCompletions(prev => ({ ...prev, company_context: true }));
+                showSuccessToast('Company context saved');
+                setShowContextModal(false);
               } catch (err) {
                 console.error('Failed to save context:', err);
+                alert('Failed to save company context. Please try again.');
               }
               setSaving(null);
-              setShowContextModal(false);
             }}
             saveLabel={saving === 'context' ? 'Saving...' : 'Save'}
             saveDisabled={saving === 'context'}
