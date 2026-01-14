@@ -78,18 +78,20 @@ const AdminCompanySwitcher: React.FC<{
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    // Fetch all distinct account_names from session_tracking
+    // Fetch employee counts from employee_manager (not session_tracking)
+    // This gives accurate employee counts per company/location
     const fetchCompanies = async () => {
-      // Paginate to get ALL records (Supabase defaults to 1000)
-      let allData: any[] = [];
+      // Step 1: Get all employees with their company info
+      let allEmployees: any[] = [];
       let from = 0;
       const pageSize = 1000;
 
       while (true) {
         const { data, error } = await supabase
-          .from('session_tracking')
-          .select('account_name, program_title, company_id')
-          .order('account_name')
+          .from('employee_manager')
+          .select('company_name, program_title, company_id')
+          .neq('company_email', 'asimmons@boon-health.com')
+          .order('company_name')
           .range(from, from + pageSize - 1);
 
         if (error) {
@@ -101,33 +103,33 @@ const AdminCompanySwitcher: React.FC<{
           break;
         }
 
-        allData = [...allData, ...data];
+        allEmployees = [...allEmployees, ...data];
         if (data.length < pageSize) break;
         from += pageSize;
       }
 
-      if (allData.length > 0) {
-        // Get unique account_names with their program type, employee count, and company_id
-        const uniqueMap = new Map<string, { programType: 'GROW' | 'Scale', count: number, company_id?: string }>();
-        allData.forEach(row => {
-          if (row.account_name) {
-            const existing = uniqueMap.get(row.account_name);
+      if (allEmployees.length > 0) {
+        // Group employees by company_name and count them
+        const companyMap = new Map<string, { programType: 'GROW' | 'Scale', count: number, company_id?: string }>();
+        allEmployees.forEach(emp => {
+          if (emp.company_name) {
+            const existing = companyMap.get(emp.company_name);
             if (existing) {
               existing.count++;
               // Keep the company_id if we found one
-              if (row.company_id && !existing.company_id) {
-                existing.company_id = row.company_id;
+              if (emp.company_id && !existing.company_id) {
+                existing.company_id = emp.company_id;
               }
             } else {
-              const isScale = row.program_title?.toUpperCase().includes('SCALE') ||
-                             row.account_name?.toUpperCase().includes('SCALE');
-              uniqueMap.set(row.account_name, { programType: isScale ? 'Scale' : 'GROW', count: 1, company_id: row.company_id });
+              const isScale = emp.program_title?.toUpperCase().includes('SCALE') ||
+                             emp.company_name?.toUpperCase().includes('SCALE');
+              companyMap.set(emp.company_name, { programType: isScale ? 'Scale' : 'GROW', count: 1, company_id: emp.company_id });
             }
           }
         });
 
-        const companyList = Array.from(uniqueMap.entries()).map(([account_name, data]) => ({
-          account_name,
+        const companyList = Array.from(companyMap.entries()).map(([company_name, data]) => ({
+          account_name: company_name, // Use company_name as account_name for display
           programType: data.programType,
           employeeCount: data.count,
           company_id: data.company_id
