@@ -345,21 +345,28 @@ const HomeDashboard: React.FC<HomeDashboardProps> = ({ programTypeFilter }) => {
         }
         return normalize(wsPt) === selNorm;
     });
-    
-    // Utilization = welcome survey completions / total employees in roster
-    const welcomeSurveyCount = cohortWelcomeSurveys.length;
-    const utilizationRate = totalEmployeesCount > 0 
-        ? Math.min(100, Math.round((welcomeSurveyCount / totalEmployeesCount) * 100))
-        : 0;
 
     // --- Metrics Calculation ---
-    
+
     // Count completed sessions (for display)
-    const completedSessionsCount = cohortSessions.filter(s => {
+    const completedSessions = cohortSessions.filter(s => {
         const status = (s.status || '').toLowerCase();
         const isPast = new Date(s.session_date) < new Date();
         return !status.includes('no show') && !status.includes('cancel') && (status.includes('completed') || (!status && isPast) || (status === 'no label' && isPast));
-    }).length;
+    });
+    const completedSessionsCount = completedSessions.length;
+
+    // Count unique active participants (people who have completed at least 1 session)
+    const activeParticipants = new Set(
+        completedSessions
+            .map(s => s.employee_id || s.employee_name || s.employee_manager?.full_name)
+            .filter(Boolean)
+    ).size;
+
+    // Utilization = active participants / total employees in roster
+    const utilizationRate = totalEmployeesCount > 0
+        ? Math.min(100, Math.round((activeParticipants / totalEmployeesCount) * 100))
+        : 0;
     
     // Count no-shows/late cancels (these count as "used" sessions for progress)
     const noShowSessionsCount = cohortSessions.filter(s => {
@@ -769,7 +776,7 @@ const HomeDashboard: React.FC<HomeDashboardProps> = ({ programTypeFilter }) => {
         scheduledSessionsCount,
         targetSessions,
         totalEmployeesCount,
-        welcomeSurveyCount,
+        activeParticipants,
         utilizationRate,
         nps,
         avgSat,
@@ -879,7 +886,7 @@ const HomeDashboard: React.FC<HomeDashboardProps> = ({ programTypeFilter }) => {
               value={`${stats.utilizationRate}%`} 
               label="Utilization" 
               icon={<Activity className="w-5 h-5 text-boon-purple" />}
-              subtext={`${stats.welcomeSurveyCount} of ${stats.totalEmployeesCount} enrolled`}
+              subtext={`${stats.activeParticipants} of ${stats.totalEmployeesCount} active`}
           />
         )}
         {stats.nps !== null && (
