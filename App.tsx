@@ -107,6 +107,22 @@ const AdminCompanySwitcher: React.FC<{
         from += pageSize;
       }
 
+      // Also fetch programs table to detect mixed companies (GROW + SCALE)
+      const { data: programsData } = await supabase
+        .from('programs')
+        .select('company_id, program_type');
+
+      // Build a map of company_id -> { hasGrow, hasScale }
+      const programTypesByCompany = new Map<string, { hasGrow: boolean, hasScale: boolean }>();
+      programsData?.forEach((p: any) => {
+        if (p.company_id) {
+          const existing = programTypesByCompany.get(p.company_id) || { hasGrow: false, hasScale: false };
+          if (p.program_type?.toUpperCase() === 'GROW') existing.hasGrow = true;
+          if (p.program_type?.toUpperCase() === 'SCALE') existing.hasScale = true;
+          programTypesByCompany.set(p.company_id, existing);
+        }
+      });
+
       if (allData.length > 0) {
         // Get unique account_names with their program type, employee count, and company_id
         // Track both hasGrow and hasScale to detect mixed companies
@@ -133,6 +149,18 @@ const AdminCompanySwitcher: React.FC<{
                 count: 1,
                 company_id: row.company_id
               });
+            }
+          }
+        });
+
+        // Enhance with programs table data for accurate mixed detection
+        uniqueMap.forEach((value, key) => {
+          if (value.company_id) {
+            const programTypes = programTypesByCompany.get(value.company_id);
+            if (programTypes) {
+              // Override with accurate data from programs table
+              value.hasGrow = programTypes.hasGrow;
+              value.hasScale = programTypes.hasScale;
             }
           }
         });
@@ -236,6 +264,7 @@ const MainPortalLayout: React.FC = () => {
   const [programType, setProgramType] = useState<'GROW' | 'Scale' | 'Exec' | null>(null);
   const [programTypeLoading, setProgramTypeLoading] = useState(true);
   const [hasBothProgramTypes, setHasBothProgramTypes] = useState(false);  // For companies with both GROW and SCALE
+  const [selectedProgramView, setSelectedProgramView] = useState<'GROW' | 'Scale'>('Scale');  // For mixed companies
   
   // Show Setup tab only during onboarding (before launch_date)
   const [showSetup, setShowSetup] = useState(false);
@@ -261,6 +290,14 @@ const MainPortalLayout: React.FC = () => {
     setProgramType(newProgramType);
     setHasBothProgramTypes(hasBothTypes || false);
     window.location.reload();
+  };
+
+  const handleProgramViewChange = (view: 'GROW' | 'Scale') => {
+    setSelectedProgramView(view);
+    localStorage.setItem('boon_selected_program_view', view);
+    // Navigate to dashboard when switching views
+    setActiveTab('dashboard');
+    navigate('/');
   };
 
   useEffect(() => {
@@ -300,6 +337,11 @@ const MainPortalLayout: React.FC = () => {
               // Restore hasBothProgramTypes for mixed companies (GROW + SCALE)
               if (override.hasBothTypes) {
                 setHasBothProgramTypes(true);
+                // Restore selected program view for mixed companies
+                const savedView = localStorage.getItem('boon_selected_program_view');
+                if (savedView === 'GROW' || savedView === 'Scale') {
+                  setSelectedProgramView(savedView);
+                }
               }
             }
           } catch {}
@@ -490,7 +532,11 @@ const MainPortalLayout: React.FC = () => {
   }
 
   // Scale-specific navigation
-  const isScale = programType?.toUpperCase() === 'SCALE';
+  // For mixed companies (hasBothProgramTypes), use selectedProgramView
+  // Otherwise, use the programType from metadata
+  const isScale = hasBothProgramTypes
+    ? selectedProgramView === 'Scale'
+    : programType?.toUpperCase() === 'SCALE';
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row bg-boon-bg font-sans text-boon-dark">
@@ -547,10 +593,35 @@ const MainPortalLayout: React.FC = () => {
             )}
           </div>
           {isAdmin && (
-            <AdminCompanySwitcher 
+            <AdminCompanySwitcher
               currentCompany={companyName}
               onCompanyChange={handleCompanyChange}
             />
+          )}
+          {/* Program View Toggle for mixed companies (GROW + SCALE) */}
+          {hasBothProgramTypes && (
+            <div className="mt-2 flex rounded-lg bg-gray-100 p-1">
+              <button
+                onClick={() => handleProgramViewChange('Scale')}
+                className={`flex-1 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                  selectedProgramView === 'Scale'
+                    ? 'bg-white text-purple-700 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Scale
+              </button>
+              <button
+                onClick={() => handleProgramViewChange('GROW')}
+                className={`flex-1 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                  selectedProgramView === 'GROW'
+                    ? 'bg-white text-blue-700 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                GROW
+              </button>
+            </div>
           )}
           {isAdmin && isManager && (
             <button
