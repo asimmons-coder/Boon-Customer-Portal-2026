@@ -763,12 +763,12 @@ const MainPortalLayout: React.FC = () => {
             <Route path="/setup" element={<SetupDashboard />} />
             {/* Dashboard route shows Scale or GROW based on program type */}
             <Route path="/" element={isScale
-              ? <ScaleDashboard programTypeFilter={hasBothProgramTypes ? 'SCALE' : undefined} />
-              : <HomeDashboard programTypeFilter={hasBothProgramTypes ? 'GROW' : undefined} />
+              ? <ScaleDashboard programTypeFilter={hasBothProgramTypes ? selectedProgramView?.toUpperCase() : undefined} />
+              : <HomeDashboard programTypeFilter={hasBothProgramTypes ? selectedProgramView?.toUpperCase() : undefined} />
             } />
             <Route path="/sessions" element={<SessionDashboard filterType={filterType} filterValue={filterValue} />} />
             <Route path="/employees" element={<EmployeeDashboard />} />
-            <Route path="/impact" element={<ImpactDashboard programTypeFilter={hasBothProgramTypes ? 'GROW' : undefined} />} />
+            <Route path="/impact" element={<ImpactDashboard programTypeFilter={hasBothProgramTypes ? selectedProgramView?.toUpperCase() : undefined} />} />
             <Route path="/themes" element={<ThemesDashboard programTypeFilter={hasBothProgramTypes ? selectedProgramView?.toUpperCase() : undefined} />} />
             <Route path="/baseline" element={isScale && !hasBothProgramTypes
               ? <ScaleBaselineDashboard />
@@ -777,8 +777,8 @@ const MainPortalLayout: React.FC = () => {
             {/* Redirect /scale to / for Scale users, show Scale for GROW users who manually navigate */}
             <Route path="/scale" element={isScale ? <Navigate to="/" replace /> : <ScaleDashboard />} />
             <Route path="*" element={isScale
-              ? <ScaleDashboard programTypeFilter={hasBothProgramTypes ? 'SCALE' : undefined} />
-              : <HomeDashboard programTypeFilter={hasBothProgramTypes ? 'GROW' : undefined} />
+              ? <ScaleDashboard programTypeFilter={hasBothProgramTypes ? selectedProgramView?.toUpperCase() : undefined} />
+              : <HomeDashboard programTypeFilter={hasBothProgramTypes ? selectedProgramView?.toUpperCase() : undefined} />
             } />
           </Routes>
         </div>
