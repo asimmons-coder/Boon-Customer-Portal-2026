@@ -768,15 +768,71 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
 
       setProgress('Generating CSV...');
 
+      // Fetch program config to get session duration
+      const programConfigs = await getProgramConfig(companyFilter);
+      const durationByProgram = new Map<string, number>();
+      programConfigs.forEach(pc => {
+        const programTitle = (pc as any).program_title;
+        const duration = (pc as any).duration_minutes;
+        if (programTitle && duration) {
+          durationByProgram.set(programTitle, duration);
+        }
+      });
+
+      // Default durations by program type
+      const getSessionDuration = (programTitle: string): string => {
+        // Check program_config first
+        if (durationByProgram.has(programTitle)) {
+          return durationByProgram.get(programTitle)!.toString();
+        }
+        // Default: GROW = 45 min, SCALE/others = 60 min
+        if (programTitle?.toUpperCase().includes('GROW')) {
+          return '45';
+        }
+        return '60';
+      };
+
+      // Calculate monthly summary for billing (all sessions)
+      const monthlySummary = new Map<string, number>();
+      filteredSessions.forEach(s => {
+        const sessionDate = (s as any).session_date;
+        if (sessionDate) {
+          const date = new Date(sessionDate);
+          const monthKey = date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+          monthlySummary.set(monthKey, (monthlySummary.get(monthKey) || 0) + 1);
+        }
+      });
+
+      // Sort months chronologically
+      const sortedMonths = Array.from(monthlySummary.entries()).sort((a, b) => {
+        const dateA = new Date(a[0]);
+        const dateB = new Date(b[0]);
+        return dateA.getTime() - dateB.getTime();
+      });
+
       // Build CSV content
+      const escapeCSV = (val: string) => {
+        if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+          return `"${val.replace(/"/g, '""')}"`;
+        }
+        return val;
+      };
+
+      // Monthly Summary section
+      const summaryLines = [
+        'MONTHLY BILLING SUMMARY',
+        'Month,Total Sessions',
+        ...sortedMonths.map(([month, count]) => `${month},${count}`),
+        `Total,${filteredSessions.length}`,
+        '',
+        'SESSION DETAILS'
+      ];
+
       const headers = [
         'Employee Name',
-        'Employee Email',
         'Coach Name',
         'Session Date',
-        'Session Status',
         'Program',
-        'Session Number',
         'Duration (min)'
       ];
 
@@ -790,34 +846,29 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
             })
           : '';
 
+        const programTitle = (s as any).program_title || '';
+        // Use duration_minutes from session_tracking, fallback to program config or defaults
+        const sessionDuration = (s as any).duration_minutes
+          ? (s as any).duration_minutes.toString()
+          : getSessionDuration(programTitle);
         return [
           (s as any).employee_name || '',
-          (s as any).employee_email || '',
           (s as any).coach_name || '',
           formattedDate,
-          (s as any).status || '',
-          (s as any).program_title || '',
-          (s as any).session_number || '',
-          (s as any).duration || '60'
+          programTitle,
+          sessionDuration
         ];
       });
 
       // Sort by date (most recent first)
       rows.sort((a, b) => {
-        const dateA = new Date(a[3]);
-        const dateB = new Date(b[3]);
+        const dateA = new Date(a[2]);
+        const dateB = new Date(b[2]);
         return dateB.getTime() - dateA.getTime();
       });
 
-      // Create CSV string
-      const escapeCSV = (val: string) => {
-        if (val.includes(',') || val.includes('"') || val.includes('\n')) {
-          return `"${val.replace(/"/g, '""')}"`;
-        }
-        return val;
-      };
-
       const csvContent = [
+        ...summaryLines,
         headers.map(escapeCSV).join(','),
         ...rows.map(row => row.map(escapeCSV).join(','))
       ].join('\n');
