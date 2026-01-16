@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { isAdminEmail } from '../constants';
 import { supabase } from '../lib/supabaseClient';
 import { getDashboardSessions, getCompetencyScores, getSurveyResponses, getProgramConfig, CompanyFilter, buildCompanyFilter } from '../lib/dataFetcher';
-import { FileDown, Loader2, X } from 'lucide-react';
+import { FileDown, Loader2, X, Table } from 'lucide-react';
 import jsPDF from 'jspdf';
 
 interface ReportGeneratorProps {
@@ -287,8 +287,9 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
     
     // Fetch programs based on date range
     setProgress('Loading program data...');
-    const allPrograms = await getProgramConfig();
-    const programsFiltered = allPrograms.filter(p => matchesCompany((p as any).account_name, (p as any).program_title));
+    const allPrograms = await getProgramConfig(companyFilter);
+    // Programs are already filtered by company from the query
+    const programsFiltered = allPrograms;
     
     // Filter programs based on selected date range
     let programsForPeriod: { name: string; startDate: string }[] = [];
@@ -702,6 +703,150 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
     }
   };
 
+  const generateSessionCSV = async () => {
+    setLoading(true);
+    setProgress('Fetching session data...');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const email = session?.user?.email || '';
+      const isAdmin = isAdminEmail(email);
+
+      let company = session?.user?.app_metadata?.company || '';
+      let companyId = session?.user?.app_metadata?.company_id || '';
+      let accName = session?.user?.app_metadata?.account_name || '';
+
+      // Check for admin override
+      if (isAdmin) {
+        try {
+          const stored = localStorage.getItem('boon_admin_company_override');
+          if (stored) {
+            const override = JSON.parse(stored);
+            company = override.account_name;
+            companyId = override.company_id || companyId;
+            accName = override.account_name || accName;
+          }
+        } catch {}
+      }
+
+      // Build company filter
+      const companyFilter = buildCompanyFilter(companyId, accName, company);
+
+      // Calculate date range filter
+      const now = new Date();
+      let startDate: Date | null = null;
+
+      if (dateRange === 'ytd') {
+        startDate = new Date(now.getFullYear(), 0, 1);
+      } else if (dateRange === 'q4') {
+        startDate = new Date(2024, 9, 1);
+      } else if (dateRange === 'q3') {
+        startDate = new Date(2024, 6, 1);
+      }
+
+      // Fetch sessions
+      const allSessions = await getDashboardSessions(companyFilter);
+
+      // Filter by program and date range
+      const filteredSessions = allSessions.filter(s => {
+        const sessionDate = (s as any).session_date;
+        const programTitle = (s as any).program_title;
+
+        // Program filter
+        if (selectedProgram !== 'all' && programTitle !== selectedProgram) {
+          return false;
+        }
+
+        // Date filter
+        if (startDate && sessionDate) {
+          const date = new Date(sessionDate);
+          if (date < startDate) return false;
+        }
+
+        return true;
+      });
+
+      setProgress('Generating CSV...');
+
+      // Build CSV content
+      const headers = [
+        'Employee Name',
+        'Employee Email',
+        'Coach Name',
+        'Session Date',
+        'Session Status',
+        'Program',
+        'Session Number',
+        'Duration (min)'
+      ];
+
+      const rows = filteredSessions.map(s => {
+        const sessionDate = (s as any).session_date;
+        const formattedDate = sessionDate
+          ? new Date(sessionDate).toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit'
+            })
+          : '';
+
+        return [
+          (s as any).employee_name || '',
+          (s as any).employee_email || '',
+          (s as any).coach_name || '',
+          formattedDate,
+          (s as any).status || '',
+          (s as any).program_title || '',
+          (s as any).session_number || '',
+          (s as any).duration || '60'
+        ];
+      });
+
+      // Sort by date (most recent first)
+      rows.sort((a, b) => {
+        const dateA = new Date(a[3]);
+        const dateB = new Date(b[3]);
+        return dateB.getTime() - dateA.getTime();
+      });
+
+      // Create CSV string
+      const escapeCSV = (val: string) => {
+        if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+          return `"${val.replace(/"/g, '""')}"`;
+        }
+        return val;
+      };
+
+      const csvContent = [
+        headers.map(escapeCSV).join(','),
+        ...rows.map(row => row.map(escapeCSV).join(','))
+      ].join('\n');
+
+      // Download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+
+      const dateStr = new Date().toISOString().split('T')[0];
+      const programStr = selectedProgram === 'all' ? 'All_Programs' : selectedProgram.replace(/\s+/g, '_');
+      link.setAttribute('download', `Session_Tracker_${companyName?.replace(/\s+/g, '_') || 'Company'}_${programStr}_${dateStr}.csv`);
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setProgress('');
+      setIsOpen(false);
+    } catch (err) {
+      console.error('Error generating CSV:', err);
+      setProgress('Error generating CSV. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <>
       <button
@@ -723,9 +868,9 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
             </button>
             
             <div className="mb-6">
-              <h2 className="text-xl font-bold text-gray-900">Generate Report</h2>
+              <h2 className="text-xl font-bold text-gray-900">Export Reports</h2>
               <p className="text-sm text-gray-500 mt-1">
-                Create a PDF summary of your coaching program's impact.
+                Download an impact summary or detailed session data.
               </p>
             </div>
             
@@ -770,35 +915,40 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
               </div>
             )}
             
-            <div className="flex gap-3">
-              <button
-                onClick={() => setIsOpen(false)}
-                className="flex-1 px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
-              >
-                Cancel
-              </button>
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Choose Export Type</p>
+
               <button
                 onClick={generatePDF}
                 disabled={loading}
-                className="flex-1 px-4 py-2 bg-blue-600 rounded-lg text-sm font-medium text-white hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="w-full px-4 py-3 bg-blue-600 rounded-lg text-sm font-medium text-white hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3"
               >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <FileDown className="w-4 h-4" />
-                    Download PDF
-                  </>
-                )}
+                <FileDown className="w-5 h-5" />
+                <div className="text-left">
+                  <div className="font-semibold">Impact Report (PDF)</div>
+                  <div className="text-xs text-blue-200">Metrics, trends, growth areas & testimonials</div>
+                </div>
+              </button>
+
+              <button
+                onClick={generateSessionCSV}
+                disabled={loading}
+                className="w-full px-4 py-3 bg-green-600 rounded-lg text-sm font-medium text-white hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3"
+              >
+                <Table className="w-5 h-5" />
+                <div className="text-left">
+                  <div className="font-semibold">Session Tracker (CSV)</div>
+                  <div className="text-xs text-green-200">Detailed session list for billing & invoicing</div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setIsOpen(false)}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition mt-2"
+              >
+                Cancel
               </button>
             </div>
-            
-            <p className="text-xs text-gray-400 text-center mt-4">
-              Includes: metrics, session trends, growth areas, themes & testimonials
-            </p>
           </div>
         </div>
       )}
