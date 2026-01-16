@@ -768,6 +768,30 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
 
       setProgress('Generating CSV...');
 
+      // Fetch program config to get session duration
+      const programConfigs = await getProgramConfig(companyFilter);
+      const durationByProgram = new Map<string, number>();
+      programConfigs.forEach(pc => {
+        const programTitle = (pc as any).program_title;
+        const duration = (pc as any).duration_minutes;
+        if (programTitle && duration) {
+          durationByProgram.set(programTitle, duration);
+        }
+      });
+
+      // Default durations by program type
+      const getSessionDuration = (programTitle: string): string => {
+        // Check program_config first
+        if (durationByProgram.has(programTitle)) {
+          return durationByProgram.get(programTitle)!.toString();
+        }
+        // Default: GROW = 45 min, SCALE/others = 60 min
+        if (programTitle?.toUpperCase().includes('GROW')) {
+          return '45';
+        }
+        return '60';
+      };
+
       // Calculate monthly summary for billing (all sessions)
       const monthlySummary = new Map<string, number>();
       filteredSessions.forEach(s => {
@@ -822,12 +846,13 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
             })
           : '';
 
+        const programTitle = (s as any).program_title || '';
         return [
           (s as any).employee_name || '',
           (s as any).coach_name || '',
           formattedDate,
-          (s as any).program_title || '',
-          (s as any).duration || '60'
+          programTitle,
+          getSessionDuration(programTitle)
         ];
       });
 
