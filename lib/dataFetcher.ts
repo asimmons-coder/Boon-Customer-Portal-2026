@@ -813,12 +813,12 @@ export const buildCompanyFilter = (
 
 // ============================================
 // LOOKUP TABLE QUERIES (Source of Truth)
+// Uses program_config as the single source
 // ============================================
 
 export interface Company {
   id: string;
   name: string;
-  slug: string;
   program_type?: string;
   is_active?: boolean;
 }
@@ -829,17 +829,21 @@ export interface Program {
   name: string;
   program_type?: 'GROW' | 'SCALE' | 'EXEC';
   salesforce_id?: string;
+  account_name?: string;
+  sessions_per_employee?: number;
+  program_start_date?: string;
+  program_end_date?: string;
+  program_status?: string;
 }
 
 /**
- * Fetches all companies from the lookup table.
+ * Fetches distinct companies from program_config table.
  */
 export const getCompanies = async (): Promise<Company[]> => {
   const { data, error } = await supabase
-    .from('companies')
-    .select('*')
-    .eq('is_active', true)
-    .order('name');
+    .from('program_config')
+    .select('company_id, account_name, program_type')
+    .order('account_name');
 
   if (error) {
     console.error('Error fetching companies:', error);
@@ -847,50 +851,38 @@ export const getCompanies = async (): Promise<Company[]> => {
     return [];
   }
 
-  return data as Company[];
+  // Dedupe by account_name to get unique companies
+  const seen = new Set<string>();
+  const companies: Company[] = [];
+
+  data?.forEach((row: any) => {
+    if (row.account_name && !seen.has(row.account_name)) {
+      seen.add(row.account_name);
+      companies.push({
+        id: row.company_id || row.account_name,
+        name: row.account_name,
+        program_type: row.program_type,
+        is_active: true
+      });
+    }
+  });
+
+  return companies;
 };
 
 /**
- * Fetches programs for a specific company from the lookup table.
+ * Fetches programs from program_config table.
  */
 export const getPrograms = async (companyId?: string, companyName?: string): Promise<Program[]> => {
-  // If filtering by company name, first find matching company IDs
-  if (companyName && !companyId) {
-    const { data: companies } = await supabase
-      .from('companies')
-      .select('id')
-      .ilike('name', `%${companyName}%`);
-
-    if (!companies || companies.length === 0) {
-      console.log('No companies found matching:', companyName);
-      return [];
-    }
-
-    const companyIds = companies.map(c => c.id);
-
-    const { data, error } = await supabase
-      .from('programs')
-      .select('*')
-      .in('company_id', companyIds)
-      .order('name');
-
-    if (error) {
-      console.error('Error fetching programs:', error);
-      Sentry.captureException(error, { tags: { query: 'getPrograms' } });
-      return [];
-    }
-
-    return data as Program[];
-  }
-
-  // Direct company_id filter
   let query = supabase
-    .from('programs')
+    .from('program_config')
     .select('*')
-    .order('name');
+    .order('account_name');
 
   if (companyId) {
     query = query.eq('company_id', companyId);
+  } else if (companyName) {
+    query = query.ilike('account_name', `%${companyName}%`);
   }
 
   const { data, error } = await query;
@@ -901,7 +893,19 @@ export const getPrograms = async (companyId?: string, companyName?: string): Pro
     return [];
   }
 
-  return data as Program[];
+  // Map program_config to Program interface
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    company_id: row.company_id,
+    name: row.program_title || `${row.account_name} ${row.program_type}`,
+    program_type: row.program_type,
+    salesforce_id: row.salesforce_program_id,
+    account_name: row.account_name,
+    sessions_per_employee: row.sessions_per_employee,
+    program_start_date: row.program_start_date,
+    program_end_date: row.program_end_date,
+    program_status: row.program_status
+  })) as Program[];
 };
 
 /**
