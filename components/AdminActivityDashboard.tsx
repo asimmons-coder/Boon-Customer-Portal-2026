@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { isAdminEmail } from '../constants';
-import { Activity, Users, Building2, BarChart3, RefreshCw } from 'lucide-react';
+import { Activity, Users, Building2, BarChart3, RefreshCw, ChevronDown, ChevronUp, X, Calendar } from 'lucide-react';
 
 interface ClientActivity {
   client_name: string | null;
@@ -18,6 +18,7 @@ interface ClientActivity {
 interface UserActivity {
   email: string | null;
   client_name: string | null;
+  client_id: string | null;
   total_events: number;
   logins: number;
   report_views: number;
@@ -33,6 +34,27 @@ interface EventSummary {
   unique_clients: number;
 }
 
+interface PortalEvent {
+  id: string;
+  user_id: string | null;
+  client_id: string | null;
+  event_name: string;
+  properties: Record<string, any> | null;
+  page_path: string | null;
+  created_at: string;
+}
+
+type SortField = 'last_active' | 'total_events' | 'unique_users' | 'logins' | 'report_views' | 'downloads';
+type SortDirection = 'asc' | 'desc';
+type DateRange = '7' | '30' | '90' | 'all';
+
+const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
+  { value: '7', label: 'Last 7 days' },
+  { value: '30', label: 'Last 30 days' },
+  { value: '90', label: 'Last 90 days' },
+  { value: 'all', label: 'All time' },
+];
+
 const AdminActivityDashboard: React.FC = () => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -41,17 +63,158 @@ const AdminActivityDashboard: React.FC = () => {
   const [userActivity, setUserActivity] = useState<UserActivity[]>([]);
   const [eventSummary, setEventSummary] = useState<EventSummary[]>([]);
 
+  // Date range filter
+  const [dateRange, setDateRange] = useState<DateRange>('30');
+
+  // Sorting state
+  const [clientSort, setClientSort] = useState<{ field: SortField; direction: SortDirection }>({ field: 'total_events', direction: 'desc' });
+  const [userSort, setUserSort] = useState<{ field: SortField; direction: SortDirection }>({ field: 'total_events', direction: 'desc' });
+
+  // Client drill-down modal
+  const [selectedClient, setSelectedClient] = useState<ClientActivity | null>(null);
+  const [clientUsers, setClientUsers] = useState<UserActivity[]>([]);
+  const [clientEvents, setClientEvents] = useState<PortalEvent[]>([]);
+  const [loadingClientDetails, setLoadingClientDetails] = useState(false);
+
+  const getDateFilter = () => {
+    if (dateRange === 'all') return null;
+    const days = parseInt(dateRange);
+    const date = new Date();
+    date.setDate(date.getDate() - days);
+    return date.toISOString();
+  };
+
   const fetchData = async () => {
     try {
-      const [clientRes, userRes, eventRes] = await Promise.all([
-        supabase.from('portal_activity_by_client').select('*').limit(50),
-        supabase.from('portal_activity_by_user').select('*').limit(100),
-        supabase.from('portal_event_summary').select('*').limit(50),
-      ]);
+      const dateFilter = getDateFilter();
 
-      if (clientRes.data) setClientActivity(clientRes.data);
-      if (userRes.data) setUserActivity(userRes.data);
-      if (eventRes.data) setEventSummary(eventRes.data);
+      // Query portal_events directly for flexible date filtering
+      let eventsQuery = supabase
+        .from('portal_events')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (dateFilter) {
+        eventsQuery = eventsQuery.gte('created_at', dateFilter);
+      }
+
+      const { data: events, error } = await eventsQuery.limit(10000);
+
+      if (error) {
+        console.error('Error fetching events:', error);
+        return;
+      }
+
+      if (!events) return;
+
+      // Aggregate client activity
+      const clientMap = new Map<string, ClientActivity>();
+      const userMap = new Map<string, UserActivity>();
+      const eventMap = new Map<string, EventSummary>();
+
+      for (const event of events) {
+        const clientKey = event.client_id || 'unknown';
+        const userKey = event.user_id || 'unknown';
+        const eventKey = `${event.event_name}|${event.properties?.report_type || ''}`;
+
+        // Client aggregation
+        if (!clientMap.has(clientKey)) {
+          clientMap.set(clientKey, {
+            client_id: event.client_id,
+            client_name: event.properties?.client_name || null,
+            unique_users: 0,
+            total_events: 0,
+            logins: 0,
+            dashboard_views: 0,
+            report_views: 0,
+            downloads: 0,
+            last_active: event.created_at,
+          });
+        }
+        const client = clientMap.get(clientKey)!;
+        client.total_events++;
+        if (event.event_name === 'login') client.logins++;
+        if (event.event_name === 'dashboard_viewed') client.dashboard_views++;
+        if (event.event_name === 'report_viewed') client.report_views++;
+        if (event.event_name === 'report_downloaded') client.downloads++;
+        if (new Date(event.created_at) > new Date(client.last_active || 0)) {
+          client.last_active = event.created_at;
+        }
+
+        // User aggregation
+        if (!userMap.has(userKey)) {
+          userMap.set(userKey, {
+            email: event.properties?.email || null,
+            client_name: event.properties?.client_name || null,
+            client_id: event.client_id,
+            total_events: 0,
+            logins: 0,
+            report_views: 0,
+            downloads: 0,
+            last_active: event.created_at,
+          });
+        }
+        const user = userMap.get(userKey)!;
+        user.total_events++;
+        if (event.event_name === 'login') user.logins++;
+        if (event.event_name === 'report_viewed') user.report_views++;
+        if (event.event_name === 'report_downloaded') user.downloads++;
+        if (new Date(event.created_at) > new Date(user.last_active || 0)) {
+          user.last_active = event.created_at;
+        }
+
+        // Event aggregation
+        if (!eventMap.has(eventKey)) {
+          eventMap.set(eventKey, {
+            event_name: event.event_name,
+            report_type: event.properties?.report_type || null,
+            count: 0,
+            unique_users: 0,
+            unique_clients: 0,
+          });
+        }
+        eventMap.get(eventKey)!.count++;
+      }
+
+      // Calculate unique users per client
+      const usersByClient = new Map<string, Set<string>>();
+      for (const event of events) {
+        const clientKey = event.client_id || 'unknown';
+        if (!usersByClient.has(clientKey)) {
+          usersByClient.set(clientKey, new Set());
+        }
+        if (event.user_id) {
+          usersByClient.get(clientKey)!.add(event.user_id);
+        }
+      }
+      for (const [clientKey, users] of usersByClient) {
+        const client = clientMap.get(clientKey);
+        if (client) client.unique_users = users.size;
+      }
+
+      // Calculate unique users/clients per event type
+      const usersPerEvent = new Map<string, Set<string>>();
+      const clientsPerEvent = new Map<string, Set<string>>();
+      for (const event of events) {
+        const eventKey = `${event.event_name}|${event.properties?.report_type || ''}`;
+        if (!usersPerEvent.has(eventKey)) {
+          usersPerEvent.set(eventKey, new Set());
+          clientsPerEvent.set(eventKey, new Set());
+        }
+        if (event.user_id) usersPerEvent.get(eventKey)!.add(event.user_id);
+        if (event.client_id) clientsPerEvent.get(eventKey)!.add(event.client_id);
+      }
+      for (const [eventKey, users] of usersPerEvent) {
+        const eventData = eventMap.get(eventKey);
+        if (eventData) {
+          eventData.unique_users = users.size;
+          eventData.unique_clients = clientsPerEvent.get(eventKey)?.size || 0;
+        }
+      }
+
+      setClientActivity(Array.from(clientMap.values()).filter(c => c.client_id));
+      setUserActivity(Array.from(userMap.values()).filter(u => u.email || u.total_events > 0));
+      setEventSummary(Array.from(eventMap.values()));
     } catch (err) {
       console.error('Error fetching activity data:', err);
     }
@@ -78,10 +241,49 @@ const AdminActivityDashboard: React.FC = () => {
     checkAdminAndFetch();
   }, []);
 
+  useEffect(() => {
+    if (isAdmin && !loading) {
+      setRefreshing(true);
+      fetchData().finally(() => setRefreshing(false));
+    }
+  }, [dateRange]);
+
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetchData();
     setRefreshing(false);
+  };
+
+  const handleClientClick = async (client: ClientActivity) => {
+    setSelectedClient(client);
+    setLoadingClientDetails(true);
+
+    try {
+      const dateFilter = getDateFilter();
+
+      // Fetch users for this client
+      const filteredUsers = userActivity.filter(u => u.client_id === client.client_id);
+      setClientUsers(filteredUsers);
+
+      // Fetch recent events for this client
+      let eventsQuery = supabase
+        .from('portal_events')
+        .select('*')
+        .eq('client_id', client.client_id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (dateFilter) {
+        eventsQuery = eventsQuery.gte('created_at', dateFilter);
+      }
+
+      const { data: events } = await eventsQuery;
+      setClientEvents(events || []);
+    } catch (err) {
+      console.error('Error fetching client details:', err);
+    } finally {
+      setLoadingClientDetails(false);
+    }
   };
 
   const formatDate = (dateStr: string | null) => {
@@ -97,6 +299,84 @@ const AdminActivityDashboard: React.FC = () => {
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const formatDateTime = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
+
+  // Sorted data
+  const sortedClientActivity = useMemo(() => {
+    return [...clientActivity].sort((a, b) => {
+      const aVal = a[clientSort.field] ?? 0;
+      const bVal = b[clientSort.field] ?? 0;
+      if (clientSort.field === 'last_active') {
+        const aDate = new Date(aVal as string || 0).getTime();
+        const bDate = new Date(bVal as string || 0).getTime();
+        return clientSort.direction === 'desc' ? bDate - aDate : aDate - bDate;
+      }
+      return clientSort.direction === 'desc'
+        ? (bVal as number) - (aVal as number)
+        : (aVal as number) - (bVal as number);
+    });
+  }, [clientActivity, clientSort]);
+
+  const sortedUserActivity = useMemo(() => {
+    return [...userActivity].sort((a, b) => {
+      const aVal = a[userSort.field] ?? 0;
+      const bVal = b[userSort.field] ?? 0;
+      if (userSort.field === 'last_active') {
+        const aDate = new Date(aVal as string || 0).getTime();
+        const bDate = new Date(bVal as string || 0).getTime();
+        return userSort.direction === 'desc' ? bDate - aDate : aDate - bDate;
+      }
+      return userSort.direction === 'desc'
+        ? (bVal as number) - (aVal as number)
+        : (aVal as number) - (bVal as number);
+    });
+  }, [userActivity, userSort]);
+
+  const SortableHeader: React.FC<{
+    field: SortField;
+    label: string;
+    currentSort: { field: SortField; direction: SortDirection };
+    onSort: (field: SortField) => void;
+    align?: 'left' | 'right';
+  }> = ({ field, label, currentSort, onSort, align = 'right' }) => (
+    <th
+      className={`px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors ${align === 'right' ? 'text-right' : 'text-left'}`}
+      onClick={() => onSort(field)}
+    >
+      <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : ''}`}>
+        {label}
+        {currentSort.field === field && (
+          currentSort.direction === 'desc'
+            ? <ChevronDown size={14} className="text-boon-blue" />
+            : <ChevronUp size={14} className="text-boon-blue" />
+        )}
+      </div>
+    </th>
+  );
+
+  const handleClientSort = (field: SortField) => {
+    setClientSort(prev => ({
+      field,
+      direction: prev.field === field && prev.direction === 'desc' ? 'asc' : 'desc'
+    }));
+  };
+
+  const handleUserSort = (field: SortField) => {
+    setUserSort(prev => ({
+      field,
+      direction: prev.field === field && prev.direction === 'desc' ? 'asc' : 'desc'
+    }));
   };
 
   if (loading) {
@@ -125,19 +405,37 @@ const AdminActivityDashboard: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-12">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Portal Activity</h1>
-          <p className="text-gray-600">Usage stats from the last 30 days</p>
+          <p className="text-gray-600">
+            Usage stats for {DATE_RANGE_OPTIONS.find(o => o.value === dateRange)?.label.toLowerCase()}
+          </p>
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Date Range Dropdown */}
+          <div className="relative">
+            <select
+              value={dateRange}
+              onChange={(e) => setDateRange(e.target.value as DateRange)}
+              className="appearance-none bg-white border border-gray-200 rounded-lg px-4 py-2 pr-10 text-sm font-medium text-gray-700 hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-boon-blue focus:border-boon-blue cursor-pointer"
+            >
+              {DATE_RANGE_OPTIONS.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <Calendar size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          </div>
+
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -175,36 +473,40 @@ const AdminActivityDashboard: React.FC = () => {
             <Building2 size={20} className="text-gray-400" />
             Client Activity
           </h2>
-          <p className="text-sm text-gray-500 mt-1">Portal usage by client company</p>
+          <p className="text-sm text-gray-500 mt-1">Click a client to see details</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Client</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Users</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Events</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Logins</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Reports</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Downloads</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Last Active</th>
+                <SortableHeader field="unique_users" label="Users" currentSort={clientSort} onSort={handleClientSort} />
+                <SortableHeader field="total_events" label="Events" currentSort={clientSort} onSort={handleClientSort} />
+                <SortableHeader field="logins" label="Logins" currentSort={clientSort} onSort={handleClientSort} />
+                <SortableHeader field="report_views" label="Reports" currentSort={clientSort} onSort={handleClientSort} />
+                <SortableHeader field="downloads" label="Downloads" currentSort={clientSort} onSort={handleClientSort} />
+                <SortableHeader field="last_active" label="Last Active" currentSort={clientSort} onSort={handleClientSort} />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {clientActivity.length === 0 ? (
+              {sortedClientActivity.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
-                    No client activity in the last 30 days
+                    No client activity in this period
                   </td>
                 </tr>
               ) : (
-                clientActivity.map((client, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                sortedClientActivity.map((client, idx) => (
+                  <tr
+                    key={idx}
+                    className="hover:bg-blue-50 cursor-pointer transition-colors"
+                    onClick={() => handleClientClick(client)}
+                  >
+                    <td className="px-6 py-4 text-sm font-medium text-boon-blue hover:underline">
                       {client.client_name || client.client_id || 'Unknown'}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600 text-right">{client.unique_users}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600 text-right">{client.total_events}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600 text-right font-medium">{client.total_events}</td>
                     <td className="px-6 py-4 text-sm text-gray-600 text-right">{client.logins}</td>
                     <td className="px-6 py-4 text-sm text-gray-600 text-right">{client.report_views}</td>
                     <td className="px-6 py-4 text-sm text-gray-600 text-right">{client.downloads}</td>
@@ -232,26 +534,28 @@ const AdminActivityDashboard: React.FC = () => {
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Client</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Logins</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Report Views</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Downloads</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Last Active</th>
+                <SortableHeader field="total_events" label="Events" currentSort={userSort} onSort={handleUserSort} />
+                <SortableHeader field="logins" label="Logins" currentSort={userSort} onSort={handleUserSort} />
+                <SortableHeader field="report_views" label="Report Views" currentSort={userSort} onSort={handleUserSort} />
+                <SortableHeader field="downloads" label="Downloads" currentSort={userSort} onSort={handleUserSort} />
+                <SortableHeader field="last_active" label="Last Active" currentSort={userSort} onSort={handleUserSort} />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {userActivity.length === 0 ? (
+              {sortedUserActivity.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
-                    No user activity in the last 30 days
+                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                    No user activity in this period
                   </td>
                 </tr>
               ) : (
-                userActivity.map((user, idx) => (
+                sortedUserActivity.slice(0, 100).map((user, idx) => (
                   <tr key={idx} className="hover:bg-gray-50">
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">
                       {user.email || 'Unknown'}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">{user.client_name || '-'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600 text-right font-medium">{user.total_events}</td>
                     <td className="px-6 py-4 text-sm text-gray-600 text-right">{user.logins}</td>
                     <td className="px-6 py-4 text-sm text-gray-600 text-right">{user.report_views}</td>
                     <td className="px-6 py-4 text-sm text-gray-600 text-right">{user.downloads}</td>
@@ -288,11 +592,13 @@ const AdminActivityDashboard: React.FC = () => {
               {eventSummary.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
-                    No events recorded in the last 30 days
+                    No events recorded in this period
                   </td>
                 </tr>
               ) : (
-                eventSummary.map((event, idx) => (
+                eventSummary
+                  .sort((a, b) => b.count - a.count)
+                  .map((event, idx) => (
                   <tr key={idx} className="hover:bg-gray-50">
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">
                       <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
@@ -316,6 +622,110 @@ const AdminActivityDashboard: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Client Drill-Down Modal */}
+      {selectedClient && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">
+                  {selectedClient.client_name || selectedClient.client_id || 'Unknown Client'}
+                </h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  {selectedClient.unique_users} users • {selectedClient.total_events} events
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedClient(null)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X size={20} className="text-gray-500" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {loadingClientDetails ? (
+                <div className="animate-pulse space-y-4">
+                  <div className="h-32 bg-gray-200 rounded-xl"></div>
+                  <div className="h-48 bg-gray-200 rounded-xl"></div>
+                </div>
+              ) : (
+                <>
+                  {/* Client Users */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                      <Users size={16} />
+                      Users ({clientUsers.length})
+                    </h3>
+                    <div className="bg-gray-50 rounded-xl overflow-hidden">
+                      <table className="w-full">
+                        <thead className="bg-gray-100">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500">Email</th>
+                            <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500">Events</th>
+                            <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500">Reports</th>
+                            <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500">Last Active</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {clientUsers.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="px-4 py-4 text-center text-gray-500 text-sm">
+                                No users found
+                              </td>
+                            </tr>
+                          ) : (
+                            clientUsers.map((user, idx) => (
+                              <tr key={idx}>
+                                <td className="px-4 py-2 text-sm text-gray-900">{user.email || 'Unknown'}</td>
+                                <td className="px-4 py-2 text-sm text-gray-600 text-right">{user.total_events}</td>
+                                <td className="px-4 py-2 text-sm text-gray-600 text-right">{user.report_views}</td>
+                                <td className="px-4 py-2 text-sm text-gray-500 text-right">{formatDate(user.last_active)}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Activity Timeline */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                      <Activity size={16} />
+                      Recent Activity
+                    </h3>
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {clientEvents.length === 0 ? (
+                        <p className="text-sm text-gray-500 text-center py-4">No recent events</p>
+                      ) : (
+                        clientEvents.map((event, idx) => (
+                          <div key={idx} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                              event.event_name === 'login' ? 'bg-blue-100 text-blue-700' :
+                              event.event_name === 'report_viewed' ? 'bg-green-100 text-green-700' :
+                              event.event_name === 'report_downloaded' ? 'bg-purple-100 text-purple-700' :
+                              event.event_name === 'dashboard_viewed' ? 'bg-orange-100 text-orange-700' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>
+                              {event.event_name}
+                            </span>
+                            {event.properties?.report_type && (
+                              <span className="text-sm text-gray-600">{event.properties.report_type}</span>
+                            )}
+                            <span className="text-xs text-gray-400 ml-auto">{formatDateTime(event.created_at)}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
