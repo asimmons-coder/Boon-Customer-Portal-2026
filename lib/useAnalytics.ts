@@ -62,12 +62,10 @@ export function useAnalytics() {
     properties: EventProperties = {}
   ) => {
     // Fire and forget - never await, never block
-    let { userId, clientId } = contextRef.current;
-
-    // Get current page path
+    const { userId, clientId } = contextRef.current;
     const pagePath = typeof window !== 'undefined' ? window.location.pathname : null;
 
-    // If context not yet initialized, try to get it now
+    // If context not yet initialized, fetch session before inserting
     if (!userId) {
       supabase.auth.getSession().then(({ data: { session } }) => {
         const user_id = session?.user?.id || null;
@@ -86,12 +84,11 @@ export function useAnalytics() {
             if (error && process.env.NODE_ENV === 'development') {
               console.warn('[Analytics] Failed to track event:', eventName, error.message);
             }
-          })
-          .catch((err) => {
-            if (process.env.NODE_ENV === 'development') {
-              console.warn('[Analytics] Failed to track event:', eventName, err);
-            }
           });
+      }).catch((err) => {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[Analytics] Failed to track event:', eventName, err);
+        }
       });
       return;
     }
