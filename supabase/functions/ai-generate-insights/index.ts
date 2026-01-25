@@ -5,9 +5,10 @@ const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
 
-// Allowed origins for CORS - configure via environment variable
-// Format: comma-separated list of origins (e.g., "https://app.boon-health.com,https://staging.boon-health.com")
+// Allowed origins for CORS - configure via environment variable to override defaults
+// Format: comma-separated list of origins (e.g., "https://app.example.com,https://staging.example.com")
 const ALLOWED_ORIGINS = Deno.env.get("ALLOWED_ORIGINS")?.split(",").map(o => o.trim()) || [
+  "https://insights.boon-health.com",
   "http://localhost:5173",
   "http://localhost:3000",
 ];
