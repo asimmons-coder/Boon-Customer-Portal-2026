@@ -1,14 +1,14 @@
 // Run with: node scripts/update-user-metadata.js
-// Requires: SUPABASE_SERVICE_ROLE_KEY env var
+// Requires: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars
 
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = 'https://jbmhvqbwfhvldrfgjqjp.supabase.co';
+const supabaseUrl = process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!serviceRoleKey) {
-  console.error('Missing SUPABASE_SERVICE_ROLE_KEY environment variable');
-  console.error('Usage: SUPABASE_SERVICE_ROLE_KEY="your-key" node scripts/update-user-metadata.js');
+if (!supabaseUrl || !serviceRoleKey) {
+  console.error('Missing required environment variables');
+  console.error('Usage: SUPABASE_URL="https://your-project.supabase.co" SUPABASE_SERVICE_ROLE_KEY="your-key" node scripts/update-user-metadata.js');
   process.exit(1);
 }
 

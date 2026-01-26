@@ -44,6 +44,7 @@ CREATE POLICY "Service role has full access"
 
 -- =============================================
 -- VIEW: Recent activity by client (last 30 days)
+-- Excludes Boon admin activity (@boon-health.com)
 -- =============================================
 DROP VIEW IF EXISTS portal_activity_by_client;
 CREATE VIEW portal_activity_by_client AS
@@ -58,15 +59,18 @@ SELECT
   COUNT(CASE WHEN pe.event_name = 'report_downloaded' THEN 1 END) as downloads,
   MAX(pe.created_at) as last_active
 FROM portal_events pe
+LEFT JOIN auth.users u ON pe.user_id = u.id
 LEFT JOIN (
   SELECT DISTINCT company_id, account_name FROM program_config
 ) pc ON pe.client_id = pc.company_id
 WHERE pe.created_at > NOW() - INTERVAL '30 days'
+  AND (u.email IS NULL OR u.email NOT LIKE '%@boon-health.com')
 GROUP BY pc.account_name, pe.client_id
 ORDER BY last_active DESC;
 
 -- =============================================
 -- VIEW: Recent activity by user (last 30 days)
+-- Excludes Boon admin activity (@boon-health.com)
 -- =============================================
 DROP VIEW IF EXISTS portal_activity_by_user;
 CREATE VIEW portal_activity_by_user AS
@@ -84,11 +88,13 @@ LEFT JOIN (
   SELECT DISTINCT company_id, account_name FROM program_config
 ) pc ON pe.client_id = pc.company_id
 WHERE pe.created_at > NOW() - INTERVAL '30 days'
+  AND (u.email IS NULL OR u.email NOT LIKE '%@boon-health.com')
 GROUP BY u.email, pc.account_name
 ORDER BY last_active DESC;
 
 -- =============================================
 -- VIEW: Event breakdown (last 30 days)
+-- Excludes Boon admin activity (@boon-health.com)
 -- =============================================
 DROP VIEW IF EXISTS portal_event_summary;
 CREATE VIEW portal_event_summary AS
@@ -96,10 +102,12 @@ SELECT
   event_name,
   properties->>'report_type' as report_type,
   COUNT(*) as count,
-  COUNT(DISTINCT user_id) as unique_users,
+  COUNT(DISTINCT pe.user_id) as unique_users,
   COUNT(DISTINCT client_id) as unique_clients
-FROM portal_events
+FROM portal_events pe
+LEFT JOIN auth.users u ON pe.user_id = u.id
 WHERE created_at > NOW() - INTERVAL '30 days'
+  AND (u.email IS NULL OR u.email NOT LIKE '%@boon-health.com')
 GROUP BY event_name, properties->>'report_type'
 ORDER BY count DESC;
 

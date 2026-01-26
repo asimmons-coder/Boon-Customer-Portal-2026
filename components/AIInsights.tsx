@@ -165,13 +165,22 @@ ${feedbackHighlights.slice(0, 5).map(f => `- "${f.substring(0, 200)}${f.length >
       // Get the session for auth
       const { data: { session } } = await supabase.auth.getSession();
       
+      if (!session?.access_token) {
+        throw new Error('Authentication required. Please sign in again.');
+      }
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error('Supabase URL not configured');
+      }
+
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL || 'https://nbwwqreqmxakevkwzmij.supabase.co'}/functions/v1/ai-generate-insights`,
+        `${supabaseUrl}/functions/v1/ai-generate-insights`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            'Authorization': `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
             companyName,
