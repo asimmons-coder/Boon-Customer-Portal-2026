@@ -988,17 +988,20 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
                 </div>
               </button>
 
-              <button
-                onClick={generateSessionCSV}
-                disabled={loading}
-                className="w-full px-4 py-3 bg-green-600 rounded-lg text-sm font-medium text-white hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3"
-              >
-                <Table className="w-5 h-5" />
-                <div className="text-left">
-                  <div className="font-semibold">Session Tracker (CSV)</div>
-                  <div className="text-xs text-green-200">Detailed session list for billing & invoicing</div>
-                </div>
-              </button>
+              {/* Session CSV only available for GROW programs, not Scale */}
+              {programType !== 'Scale' && (
+                <button
+                  onClick={generateSessionCSV}
+                  disabled={loading}
+                  className="w-full px-4 py-3 bg-green-600 rounded-lg text-sm font-medium text-white hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3"
+                >
+                  <Table className="w-5 h-5" />
+                  <div className="text-left">
+                    <div className="font-semibold">Session Tracker (CSV)</div>
+                    <div className="text-xs text-green-200">Detailed session list for billing & invoicing</div>
+                  </div>
+                </button>
+              )}
 
               <button
                 onClick={() => setIsOpen(false)}
